@@ -33,6 +33,10 @@ const PORT = Number(process.env.PORT || process.env.CHIMERA_WEB_PORT || 8787);
 const HOST = process.env.HOST || '0.0.0.0';
 const WEB_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'web');
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+// asset cache-buster: changes every deploy (new process), injected into index.html's
+// ?v= asset URLs so a Cloudflare/browser cache can't serve a stale css/js after a deploy
+// (the 4h edge TTL was shipping fresh HTML against old styles → broken mobile layout).
+const ASSET_V = Date.now().toString(36);
 
 // one shared body. DURABLE: makeDurable() rehydrates it from /data/body.json on a
 // Fly restart (so live events/grafts/caps survive) and arms debounced + periodic +
@@ -304,8 +308,18 @@ const server = createServer(async (req, res) => {
     return res.end('forbidden');
   }
   try {
+    const ext = extname(file);
+    // index.html: inject the asset version into ?v=__V__ and forbid caching the HTML, so
+    // every load pulls fresh HTML that points at the current (versioned) css/js.
+    if (rel === 'index.html') {
+      const html = (await readFile(file, 'utf8')).replace(/__V__/g, ASSET_V);
+      res.writeHead(200, { 'Content-Type': MIME['.html'], 'Cache-Control': 'no-cache' });
+      return res.end(html);
+    }
     const buf = await readFile(file);
-    res.writeHead(200, { 'Content-Type': MIME[extname(file)] ?? 'application/octet-stream' });
+    // versioned css/js are immutable per ?v= → cache hard; other assets get a modest TTL.
+    const cache = ext === '.css' || ext === '.js' ? 'public, max-age=31536000, immutable' : 'public, max-age=3600';
+    res.writeHead(200, { 'Content-Type': MIME[ext] ?? 'application/octet-stream', 'Cache-Control': cache });
     res.end(buf);
   } catch {
     res.writeHead(404, { 'Content-Type': 'text/plain' });
