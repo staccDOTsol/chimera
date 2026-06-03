@@ -30,7 +30,7 @@ import { identityFromSeed } from './identity.ts';
 import type { Identity } from './identity.ts';
 
 // the deterministic seed brains (must match src/seed.ts fixedIdentity bytes).
-const BRAINS: Array<{ name: string; byte: number; emoji?: string }> = [
+const BRAINS: Array<{ name: string; byte?: number; seed?: Uint8Array; emoji?: string }> = [
   { name: 'Leo', byte: 1 },
   { name: 'Serpens', byte: 2 },
   { name: 'Capra', byte: 3 },
@@ -45,6 +45,12 @@ const BRAINS: Array<{ name: string; byte: number; emoji?: string }> = [
   { name: 'eevee', byte: 133, emoji: '🦊' },
   { name: 'snorlax', byte: 143, emoji: '😴' },
 ];
+// live Railway agent-bots — stable identity from a hashed seed that matches each
+// bot's CHIMERA_SEED env. Distinct HS-dir names so they don't collide with the
+// deterministic seed brain of the same name.
+for (const bot of ['fomoxer', 'lamps', 'pumpmath', 'grafty', 'skillseeker']) {
+  BRAINS.push({ name: 'live-' + bot, seed: Uint8Array.from(createHash('sha256').update('twitmolt-bot:' + bot).digest()), emoji: '🤖' });
+}
 
 const TOR_BIN = process.env.TOR_BIN || 'tor';
 const WORK = process.env.ONION_HOST_DIR || join(tmpdir(), 'chimera-onions');
@@ -109,7 +115,7 @@ let torrc = `DataDirectory ${torData}\nSocksPort 0\nLog notice stdout\n`;
 const expected: Array<{ name: string; onion: string; hsdir: string }> = [];
 
 BRAINS.forEach((b, i) => {
-  const id = identityFromSeed(new Uint8Array(32).fill(b.byte));
+  const id = identityFromSeed(b.seed ?? new Uint8Array(32).fill(b.byte!));
   const port = BASE_PORT + i;
   const hsdir = join(WORK, `hs-${b.name}`);
   mkdirSync(hsdir, { recursive: true, mode: 0o700 });
