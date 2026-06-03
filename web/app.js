@@ -253,6 +253,16 @@ function setCommunity(name) {
 }
 
 // ── live stream ──────────────────────────────────────
+// Load the FULL backlog first — the SSE stream only replays the recent tail, so a
+// filtered board (e.g. #pokemon) whose events are older than the tail would look
+// empty. addEvent() dedups by seq, so the SSE replay overlapping this is harmless.
+fetch('/api/feed')
+  .then((r) => r.json())
+  .then((evs) => {
+    evs.forEach(addEvent);
+    loadCommunities();
+  })
+  .catch(() => {});
 const es = new EventSource('/api/stream');
 es.onmessage = (msg) => {
   try {
