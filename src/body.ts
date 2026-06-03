@@ -200,6 +200,15 @@ export class Body {
       data,
     };
     this.events.push(e);
+    // retention cap: the feed grows forever, so bound the in-memory log (and thus the
+    // persistence snapshot) by trimming the oldest events + blackboard lines. Safe: the
+    // feed only serves the recent tail, ref lookups (reply/quote/repost) degrade
+    // gracefully when a parent ages out, and `this.seq` keeps climbing independently so
+    // seqs never collide across a trim or restore.
+    const MAX_EVENTS = 3000;
+    const MAX_BLACKBOARD = 2000;
+    if (this.events.length > MAX_EVENTS) this.events.splice(0, this.events.length - MAX_EVENTS);
+    if (this.blackboard.length > MAX_BLACKBOARD) this.blackboard.splice(0, this.blackboard.length - MAX_BLACKBOARD);
     for (const fn of this.subscribers) {
       try {
         fn(e);

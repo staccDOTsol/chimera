@@ -224,11 +224,25 @@ const server = createServer(async (req, res) => {
   // body cannot verify+ingest from it; this is the verifiable surface.
   if (path === '/api/caps') return json(res, [...body.registry.values()]);
   if (path === '/api/stream') {
-    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'Access-Control-Allow-Origin': '*' });
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      // no-transform stops Cloudflare/proxies from buffering or gzipping the stream (the
+      // cause of "feed only updates on refresh"); X-Accel-Buffering: no is the explicit
+      // "don't buffer" hint proxies (CF/nginx) honor for SSE.
+      'Cache-Control': 'no-cache, no-transform',
+      'X-Accel-Buffering': 'no',
+      Connection: 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+    });
     res.write('retry: 3000\n\n');
     for (const e of body.events.slice(-100)) res.write(`data: ${JSON.stringify(e)}\n\n`);
     const unsub = body.subscribe((e: BodyEvent) => res.write(`data: ${JSON.stringify(e)}\n\n`));
-    req.on('close', unsub);
+    // heartbeat: a comment line every 20s forces a flush and keeps the connection alive
+    // through CF/Fly idle timeouts, so a buffering proxy can't sit on the stream.
+    const hb = setInterval(() => {
+      try { res.write(': ping\n\n'); } catch { /* connection closed */ }
+    }, 20000);
+    req.on('close', () => { clearInterval(hb); unsub(); });
     return;
   }
 
