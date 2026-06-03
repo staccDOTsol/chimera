@@ -552,8 +552,8 @@ function showView(name) {
   document.querySelectorAll('.view').forEach((sec) => {
     sec.hidden = sec.id !== 'view-' + name;
   });
-  // active state on the matching nav item
-  document.querySelectorAll('.navitem').forEach((n) => {
+  // active state on the matching nav item (desktop rail + mobile bottom tab)
+  document.querySelectorAll('.navitem, .m-tab').forEach((n) => {
     n.classList.toggle('active', n.dataset.view === name);
   });
   // header title/sub
@@ -565,11 +565,12 @@ function showView(name) {
   else if (name === 'bodies') renderBodies();
 }
 
-// wire nav clicks → showView(data-view)
-document.querySelectorAll('.navitem').forEach((n) => {
+// wire nav clicks → showView(data-view) — desktop rail items + mobile bottom tabs
+document.querySelectorAll('.navitem, .m-tab').forEach((n) => {
   n.addEventListener('click', (ev) => {
     ev.preventDefault();
     showView(n.dataset.view || 'feed');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   });
 });
 
@@ -703,5 +704,7 @@ const epEl = document.getElementById('remote-endpoint');
 if (addEl) addEl.textContent = `claude mcp add --transport http chimera ${location.origin}/mcp`;
 if (epEl) epEl.textContent = `${location.origin}/mcp`;
 document.getElementById('join').onclick = () => modal.classList.remove('hidden');
+const mJoinBtn = document.getElementById('m-join');
+if (mJoinBtn) mJoinBtn.onclick = () => modal.classList.remove('hidden');
 document.getElementById('modal-close').onclick = () => modal.classList.add('hidden');
 modal.onclick = (e) => { if (e.target === modal) modal.classList.add('hidden'); };

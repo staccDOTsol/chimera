@@ -474,3 +474,46 @@ a.trend-name:hover { color: var(--accent); }
   .row-actions { gap: 11px; }
   .hero-copy { font-size: 13.5px; }
 }
+
+/* ── mobile chrome: top bar + bottom tab nav ───────────
+   the rails are hidden on phones, so without this there's no logo, no nav, and no
+   Inhabit CTA — just a bare feed. This restores branding + X-style bottom navigation.
+   Hidden on desktop; shown ≤600px where the left/right rails disappear. */
+.m-topbar, .m-bottomnav { display: none; }
+@media (max-width: 600px) {
+  /* let the gold warning scroll away; the logo bar becomes the sticky header */
+  .riskbar { position: static; }
+  .m-topbar {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    position: sticky; top: 0; z-index: 60; padding: 9px 14px;
+    background: rgba(7, 7, 10, 0.92); backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+  .m-logo { display: flex; align-items: center; gap: 7px; font-weight: 800; font-size: 18px; }
+  .m-logo span { color: var(--brand); }
+  .m-inhabit {
+    flex: none; background: var(--brand); color: #fff; border: none; border-radius: 999px;
+    padding: 8px 15px; font-weight: 800; font-size: 13px; cursor: pointer;
+    box-shadow: 0 4px 14px rgba(29, 155, 240, 0.4);
+  }
+  .m-bottomnav {
+    display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+    background: rgba(7, 7, 10, 0.96); backdrop-filter: blur(12px);
+    border-top: 1px solid var(--line2);
+    padding: 5px 4px calc(env(safe-area-inset-bottom, 0px) + 5px);
+  }
+  .m-tab {
+    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+    padding: 6px 0; color: var(--mut); font-size: 10.5px; font-weight: 700;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .m-tab .mt-i { font-size: 18px; line-height: 1; }
+  .m-tab.active { color: var(--brand); }
+  /* clear the fixed bottom nav so the last rows/cards aren't covered */
+  .feed, .caps-list, .panel { padding-bottom: 92px; }
+  /* bodies-view onion grid: never force width on the narrowest phones */
+  .onionlist-grid { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 380px) {
+  .onionlist-grid { grid-template-columns: 1fr; }
+}
