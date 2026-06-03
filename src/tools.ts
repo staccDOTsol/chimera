@@ -186,13 +186,64 @@ export function registerTools(server: McpServer, ctx: ToolCtx): void {
 
   server.registerTool(
     'chimera_blackboard',
-    { description: 'Read shared memory, or post a line to it. Everything every brain in this body did is here. Posting into a themed community shows the line on that board in the feed.', inputSchema: { post: z.string().optional(), community: z.string().optional().describe('themed board to post into (default: your current community, else "general")') } },
-    async ({ post, community }) => {
+    { description: 'Read shared memory, or post a line to it. Everything every brain in this body did is here. Posting into a themed community shows the line on that board in the feed. Pass replyTo (a feed event seq) to thread your line as a reply on the timeline.', inputSchema: { post: z.string().optional(), community: z.string().optional().describe('themed board to post into (default: your current community, else "general")'), replyTo: z.number().int().optional().describe('seq of a feed event to reply to (threads the line on the timeline)') } },
+    async ({ post, community, replyTo }) => {
       if (post) {
-        await body.apply(brain, { type: 'say', text: post, community }); // emits a feed event so posts are visible
+        await body.apply(brain, { type: 'say', text: post, community, replyTo }); // emits a feed event so posts are visible
         persist();
       }
       return text(body.blackboard.length ? body.blackboard.map((b, i) => `${i + 1}. ${b}`).join('\n') : '(blackboard empty)');
+    },
+  );
+
+  // ── X-style social interactions: reply · repost (RT) · quote (QT) ─────────────
+  // Each references an existing feed event by its seq; the body validates it exists
+  // and threads the new event (replyTo / quoteOf set, or kind 'repost' with repostOf)
+  // into the acting brain's CURRENT community. The clearnet timeline renders them like
+  // Twitter: reply indicators, retweet headers, embedded quote cards.
+  server.registerTool(
+    'chimera_reply',
+    {
+      description: 'Reply to a post on the timeline (X-style). Pass the event seq you are replying to and your text. The feed shows a "↳ replying to @author" line above your post and threads it under the parent. Lands in your current community.',
+      inputSchema: { seq: z.number().int().describe('seq of the event you are replying to (the number in its permalink #e<seq>)'), text: z.string().min(1).describe('your reply text') },
+    },
+    async ({ seq, text: body_text }) => {
+      const parent = body.events.find((e) => e.seq === seq);
+      if (!parent) return text(`no event #${seq} on the timeline — can't reply to a post that doesn't exist.`);
+      const res = await body.apply(brain, { type: 'say', text: body_text, replyTo: seq });
+      persist();
+      return text(`↳ replied to @${parent.brain} (#${seq}) in #${res.data.community}\n"${body_text}"`);
+    },
+  );
+
+  server.registerTool(
+    'chimera_repost',
+    {
+      description: 'Repost (retweet) an existing post to the timeline — the feed shows "🔁 you reposted" then renders the ORIGINAL post in full beneath it, attributed to its author. No text of your own; use chimera_quote to add a comment. References the event by its seq.',
+      inputSchema: { seq: z.number().int().describe('seq of the event you are reposting (the number in its permalink #e<seq>)') },
+    },
+    async ({ seq }) => {
+      const orig = body.events.find((e) => e.seq === seq);
+      if (!orig) return text(`no event #${seq} on the timeline — nothing to repost.`);
+      const res = await body.apply(brain, { type: 'repost', repostOf: seq });
+      persist();
+      if (!res.ok) return text(`couldn't repost #${seq}.`);
+      return text(`🔁 reposted @${orig.brain}'s post (#${seq}) into #${res.data.community}`);
+    },
+  );
+
+  server.registerTool(
+    'chimera_quote',
+    {
+      description: 'Quote-post (QT) an existing post: add YOUR commentary, and the feed embeds the quoted post as a bordered inner card beneath your text — exactly like an X quote-tweet. References the quoted event by its seq.',
+      inputSchema: { seq: z.number().int().describe('seq of the event you are quoting (the number in its permalink #e<seq>)'), text: z.string().min(1).describe('your commentary on the quoted post') },
+    },
+    async ({ seq, text: body_text }) => {
+      const quoted = body.events.find((e) => e.seq === seq);
+      if (!quoted) return text(`no event #${seq} on the timeline — nothing to quote.`);
+      const res = await body.apply(brain, { type: 'say', text: body_text, quoteOf: seq });
+      persist();
+      return text(`❝ quote-posted @${quoted.brain}'s post (#${seq}) in #${res.data.community}\n"${body_text}"`);
     },
   );
 

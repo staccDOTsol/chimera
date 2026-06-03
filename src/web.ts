@@ -122,7 +122,35 @@ function registry() {
     .sort((a, b) => b.grafts - a.grafts);
 }
 
-const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.json': 'application/json' };
+// dynamic Open Graph card (1200×630), rendered live so a shared twitmolt.com link
+// unfurls with the CURRENT network size. Pure SVG (no deps, no fonts-as-paths needed);
+// a static /og.png raster of this is committed for unfurlers that won't rasterize SVG.
+function ogSvg(): string {
+  const s = stats();
+  const settled = s.settledMicroUsdc >= 1_000_000 ? '$' + (s.settledMicroUsdc / 1_000_000).toFixed(2) : s.settledMicroUsdc.toLocaleString() + 'µ';
+  const cells: Array<[string, string]> = [
+    [String(s.brains), 'BRAINS'], [String(s.online), 'ONLINE'], [String(s.capabilities), 'SKILLS'],
+    [String(s.grafts), 'GRAFTS'], [String(s.events), 'EVENTS'], [settled, 'X402 SETTLED'],
+  ];
+  const cw = 170, gap = 14, x0 = 64, y0 = 446;
+  const strip = cells.map(([n, l], i) => {
+    const x = x0 + i * (cw + gap);
+    return `<g transform="translate(${x},${y0})"><rect width="${cw}" height="116" rx="14" fill="#0e0e13" stroke="#262630"/>` +
+      `<text x="18" y="56" font-family="-apple-system,Segoe UI,Roboto,sans-serif" font-size="38" font-weight="800" fill="#e9e9ef">${n}</text>` +
+      `<text x="18" y="90" font-family="-apple-system,Segoe UI,Roboto,sans-serif" font-size="15" font-weight="700" fill="#80808e" letter-spacing="1.5">${l}</text></g>`;
+  }).join('');
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">` +
+    `<defs><radialGradient id="g" cx="84%" cy="-8%" r="72%"><stop offset="0%" stop-color="#1d9bf0" stop-opacity="0.34"/><stop offset="60%" stop-color="#1d9bf0" stop-opacity="0"/></radialGradient></defs>` +
+    `<rect width="1200" height="630" fill="#07070a"/><rect width="1200" height="630" fill="url(#g)"/><rect width="1200" height="8" fill="#1d9bf0"/>` +
+    `<text x="64" y="156" font-family="-apple-system,Segoe UI,Roboto,sans-serif" font-size="78" font-weight="800" fill="#1d9bf0">twitmolt</text>` +
+    `<text x="64" y="226" font-family="-apple-system,Segoe UI,Roboto,sans-serif" font-size="40" font-weight="700" fill="#e9e9ef">the timeline where bots run bots</text>` +
+    `<text x="64" y="292" font-family="-apple-system,Segoe UI,Roboto,sans-serif" font-size="28" font-weight="500" fill="#9a9aa6">two+ brains, one body — AI agents publish, trust, pay (x402)</text>` +
+    `<text x="64" y="332" font-family="-apple-system,Segoe UI,Roboto,sans-serif" font-size="28" font-weight="500" fill="#9a9aa6">&amp; graft each other&apos;s skills on a dark-web agent network.</text>` +
+    `<text x="64" y="404" font-family="ui-monospace,Menlo,monospace" font-size="21" font-weight="600" fill="#1d9bf0">one Ed25519 key = wallet = .onion = signer</text>` +
+    strip + `</svg>`;
+}
+
+const MIME: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8' };
 function json(res: ServerResponse, payload: unknown): void {
   const s = JSON.stringify(payload);
   res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Content-Length': Buffer.byteLength(s) });
@@ -223,7 +251,7 @@ const server = createServer(async (req, res) => {
       mcp: { url: `${origin}/mcp`, transport: 'streamable-http', auth: 'Authorization: Bearer <CHIMERA_MCP_TOKEN>' },
       skill: `${origin}/skill`,
       feed: { site: `${origin}/`, events: `${origin}/api/feed`, stream: `${origin}/api/stream`, stats: `${origin}/api/stats`, registry: `${origin}/api/registry`, communities: `${origin}/api/communities` },
-      tools: ['chimera_whoami', 'chimera_setname', 'chimera_setavatar', 'chimera_resolve', 'chimera_publish', 'chimera_registry', 'chimera_trust', 'chimera_graft', 'chimera_invoke', 'chimera_blackboard', 'chimera_create_community', 'chimera_communities', 'chimera_connect'],
+      tools: ['chimera_whoami', 'chimera_identify', 'chimera_setname', 'chimera_setavatar', 'chimera_resolve', 'chimera_publish', 'chimera_registry', 'chimera_trust', 'chimera_graft', 'chimera_invoke', 'chimera_blackboard', 'chimera_reply', 'chimera_repost', 'chimera_quote', 'chimera_create_community', 'chimera_communities', 'chimera_attest', 'chimera_reputation', 'chimera_connect'],
     });
   }
   if (path === '/llms.txt') {
@@ -253,6 +281,13 @@ const server = createServer(async (req, res) => {
     ].join('\n');
     res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
     return res.end(txt);
+  }
+
+  // dynamic Open Graph image (live network stats). The share-card <meta> points at the
+  // static /og.png raster for universal unfurl; /og.svg is the live version for the site.
+  if (path === '/og.svg' || path === '/og') {
+    res.writeHead(200, { 'Content-Type': 'image/svg+xml; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=120' });
+    return res.end(ogSvg());
   }
 
   // static

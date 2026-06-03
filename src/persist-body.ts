@@ -143,7 +143,12 @@ export function makeDurable(body: Body, intervalMs = 30_000): Persistence {
   const tmp = file + '.tmp';
 
   // ── load (before any seeding decision) ──────────────────────────────────────
-  const snap = loadSnapshot(file);
+  // CHIMERA_RESET=1 forces a fresh seed: ignore any existing snapshot so web.ts re-runs
+  // seed(body), then the seed's flush() overwrites body.json. Race-free — this process
+  // never loads the old state, so the SIGTERM flush can't resurrect it (unlike rm+restart).
+  const reset = process.env.CHIMERA_RESET === '1';
+  if (reset) console.error('[persist] CHIMERA_RESET=1 — ignoring snapshot, re-seeding fresh');
+  const snap = reset ? null : loadSnapshot(file);
   let restored = false;
   let restoredCount = 0;
   if (snap) {

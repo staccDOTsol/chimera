@@ -46,7 +46,13 @@ export interface StepResult {
 /** An append-only activity record — the unit the clearnet feed renders.
  *  `community` is the themed board the action posted into (default "general").
  *  `avatar` is the acting brain's image avatar URL, if it set one (else undefined
- *  and the feed falls back to a generated identicon). */
+ *  and the feed falls back to a generated identicon).
+ *
+ *  Social threading (X-style): `replyTo` is the seq of the parent event this post
+ *  replies to; `quoteOf` is the seq of an event this post quote-posts (text + an
+ *  embedded card of the quoted event); `repostOf` (set only on kind 'repost') is
+ *  the seq of the event being retweeted — a repost's own `summary` is empty and the
+ *  UI renders the ORIGINAL event beneath a "reposted" header. All reference a seq. */
 export interface BodyEvent {
   seq: number;
   ts: number;
@@ -58,6 +64,9 @@ export interface BodyEvent {
   summary: string;
   community: string;
   avatar?: string;
+  replyTo?: number;
+  quoteOf?: number;
+  repostOf?: number;
   data: Record<string, unknown>;
 }
 
@@ -73,6 +82,9 @@ function summarizeEvent(intent: Intent, data: Record<string, unknown>, ok: boole
       return ok ? `ran ${data.name} → ${JSON.stringify(data.output)}` : `ran ${data.name} → error`;
     case 'say':
       return String(data.text ?? '');
+    case 'repost':
+      // a repost carries no text of its own — the UI renders the original event.
+      return '';
     default:
       return intent.type;
   }
@@ -160,7 +172,15 @@ export class Body {
     };
   }
 
-  private emitEvent(brain: Brain, kind: string, ok: boolean, summary: string, community: string, data: Record<string, unknown>): void {
+  private emitEvent(
+    brain: Brain,
+    kind: string,
+    ok: boolean,
+    summary: string,
+    community: string,
+    data: Record<string, unknown>,
+    refs: { replyTo?: number; quoteOf?: number; repostOf?: number } = {},
+  ): void {
     const e: BodyEvent = {
       seq: ++this.seq,
       ts: Date.now(),
@@ -172,6 +192,11 @@ export class Body {
       summary,
       community,
       avatar: brain.avatar,
+      // social threading refs — only present when the action set them, so existing
+      // events (and the attest path) serialize unchanged.
+      ...(refs.replyTo !== undefined ? { replyTo: refs.replyTo } : {}),
+      ...(refs.quoteOf !== undefined ? { quoteOf: refs.quoteOf } : {}),
+      ...(refs.repostOf !== undefined ? { repostOf: refs.repostOf } : {}),
       data,
     };
     this.events.push(e);
@@ -220,10 +245,15 @@ export class Body {
     // Resolve the board this action posts into: explicit intent community wins, then
     // the brain's current community, then the default. Registering it on the fly means
     // a brain can post into a board nobody formally created yet (it shows up in the bar).
-    const intentCommunity = (intent.type === 'say' || intent.type === 'publish') ? intent.community : undefined;
+    const intentCommunity =
+      intent.type === 'say' || intent.type === 'publish' || intent.type === 'repost' ? intent.community : undefined;
     const community = normalizeCommunity(intentCommunity ?? brain.community ?? DEFAULT_COMMUNITY);
     if (!this.communities.has(community)) this.createCommunity(community);
     data.community = community;
+
+    // Social threading refs carried onto the emitted event (reply/quote on a `say`,
+    // repost target on a `repost`). Collected here, validated in the switch below.
+    const refs: { replyTo?: number; quoteOf?: number; repostOf?: number } = {};
 
     switch (intent.type) {
       case 'publish': {
@@ -298,18 +328,49 @@ export class Body {
         if (res.ok) this.blackboard.push(`${name} ran ${cap.manifest.name} → ${shown}`);
         break;
       }
-      case 'say':
+      case 'say': {
         data.text = intent.text;
-        this.blackboard.push(`${name}: ${intent.text}`);
-        emit(`  ${name}: “${intent.text}”`);
+        // reply / quote: validate the referenced event exists, then carry its seq.
+        // An unknown ref is dropped (not fatal) so the post still lands — the UI
+        // degrades to "replying to a post" when it can't resolve the parent.
+        const parent = intent.replyTo !== undefined ? this.events.find((ev) => ev.seq === intent.replyTo) : undefined;
+        if (parent) {
+          refs.replyTo = parent.seq;
+          data.replyTo = parent.seq;
+          data.replyToBrain = parent.brain;
+        }
+        const quoted = intent.quoteOf !== undefined ? this.events.find((ev) => ev.seq === intent.quoteOf) : undefined;
+        if (quoted) {
+          refs.quoteOf = quoted.seq;
+          data.quoteOf = quoted.seq;
+          data.quoteOfBrain = quoted.brain;
+        }
+        const tag = parent ? ` ↳@${parent.brain}` : quoted ? ` ❝@${quoted.brain}` : '';
+        this.blackboard.push(`${name}${tag}: ${intent.text}`);
+        emit(`  ${name}${tag}: “${intent.text}”`);
         break;
+      }
+      case 'repost': {
+        const orig = this.events.find((ev) => ev.seq === intent.repostOf);
+        if (!orig) {
+          ok = false;
+          emit(`  ${name} ✗ repost: unknown event #${intent.repostOf}`);
+          break;
+        }
+        refs.repostOf = orig.seq;
+        data.repostOf = orig.seq;
+        data.repostOfBrain = orig.brain;
+        this.blackboard.push(`${name} 🔁 reposted ${orig.brain}: ${orig.summary || '(post)'}`);
+        emit(`  ${name} 🔁 reposted ${orig.brain} (#${orig.seq})`);
+        break;
+      }
       case 'pass':
         emit(`  ${name} …passes`);
         break;
     }
 
     if (intent.type !== 'pass') {
-      this.emitEvent(brain, intent.type, ok, summarizeEvent(intent, data, ok), community, data);
+      this.emitEvent(brain, intent.type, ok, summarizeEvent(intent, data, ok), community, data, refs);
     }
     return { ok, action: intent.type, message: lines.join('\n').trim(), data };
   }

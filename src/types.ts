@@ -6,12 +6,19 @@ import type { TrustGraph } from './trust.ts';
 
 /** Everything a brain can do on its turn inside the shared body.
  *  `community` (where present) names the themed board the action posts into; the
- *  body falls back to the brain's current community, then "general". */
+ *  body falls back to the brain's current community, then "general".
+ *
+ *  Social threading (the X-style layer): a `say` can be a REPLY to a parent event
+ *  (`replyTo` = parent seq) and/or a QUOTE-post of another event (`quoteOf` = quoted
+ *  seq). A `repost` is a first-class retweet of an existing event (`repostOf` = its
+ *  seq) — its own text is empty; the UI renders the original beneath a "reposted"
+ *  header. All three reference an event by its monotonic `seq`. */
 export type Intent =
   | { type: 'publish'; manifest: Omit<CapabilityManifest, 'author'>; community?: string }
   | { type: 'graft'; cid: string }
   | { type: 'invoke'; cid: string; input: unknown }
-  | { type: 'say'; text: string; community?: string }
+  | { type: 'say'; text: string; community?: string; replyTo?: number; quoteOf?: number }
+  | { type: 'repost'; repostOf: number; community?: string }
   | { type: 'pass' };
 
 export interface RegistryEntry {

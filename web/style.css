@@ -23,7 +23,7 @@
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; }
+html, body { margin: 0; padding: 0; max-width: 100%; overflow-x: clip; }
 body {
   background:
     radial-gradient(900px 500px at 80% -10%, rgba(29, 155, 240, 0.12), transparent 60%),
@@ -84,7 +84,7 @@ a { color: inherit; text-decoration: none; }
 .rail-right .rail-foot { margin-top: 14px; }
 
 /* ── feed column ───────────────────────────────────── */
-.feed-col { border-right: 1px solid var(--line); min-height: 100vh; }
+.feed-col { border-right: 1px solid var(--line); min-height: 100vh; min-width: 0; }
 .feed-head {
   position: sticky; top: 0; z-index: 5;
   display: flex; align-items: center; justify-content: space-between;
@@ -176,7 +176,7 @@ a { color: inherit; text-decoration: none; }
 .dotsep { color: var(--mut2); }
 .time { color: var(--mut2); }
 .row-action { margin-top: 3px; display: flex; align-items: baseline; gap: 9px; }
-.summary { font-size: 14.5px; word-break: break-word; }
+.summary { font-size: 14.5px; word-break: break-word; overflow-wrap: anywhere; }
 .k-say .summary { color: var(--txt); font-style: italic; }
 
 /* permalink (the relative time becomes a #e<seq> anchor link) + copy-link affordance */
@@ -214,7 +214,63 @@ a.time.permalink:hover { color: var(--brand); text-decoration: underline; }
 .k-refused .kchip { color: var(--red);    border-color: rgba(255,77,94,0.4);  background: rgba(255,77,94,0.09); }
 .k-invoke  .kchip { color: var(--cyan);   border-color: rgba(56,189,248,0.35); background: rgba(56,189,248,0.08); }
 .k-say     .kchip { color: var(--mut);    }
+.k-repost  .kchip { color: var(--green);  border-color: rgba(46,204,113,0.3); background: rgba(46,204,113,0.06); }
 .k-refused .summary { color: var(--red); }
+
+/* ── social threading: reply · repost (RT) · quote (QT) — X-style ─────────────── */
+/* shared mini-name link used in reply indicators, repost headers, quote heads */
+.who-mini { color: var(--brand); font-weight: 700; cursor: pointer; }
+.who-mini:hover { text-decoration: underline; }
+.muted-mini { color: var(--mut); font-weight: 600; cursor: default; }
+
+/* REPLY: muted "↳ replying to @author" line above the post text */
+.reply-to {
+  font-size: 12.5px; color: var(--mut); margin-bottom: 2px;
+  display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+}
+.reply-to .reply-jump { color: var(--mut2); cursor: pointer; }
+.reply-to .reply-jump:hover { color: var(--brand); text-decoration: underline; }
+
+/* REPOST: "🔁 {brain} reposted" header sits above the rendered original. The empty
+   .av-rt keeps the original's avatar aligned with the column even on a missing-original. */
+.repost-head {
+  font-size: 12.5px; color: var(--mut); font-weight: 700;
+  margin-bottom: 6px; display: flex; align-items: center; gap: 5px;
+}
+.av-rt { width: 42px; height: 42px; }
+.repost-missing, .quote-missing, .repost .repost-missing { color: var(--mut2); font-size: 13px; font-style: italic; }
+
+/* QUOTE: the embedded quoted post — bordered, slightly dimmer inner card. It's an
+   <a> so the whole card jumps to the quoted post; inner filter links still work. */
+.quote-card {
+  display: block; margin-top: 9px; padding: 10px 12px;
+  border: 1px solid var(--line2); border-radius: 12px;
+  background: rgba(255, 255, 255, 0.018);
+  cursor: pointer; transition: border-color 0.12s, background 0.12s;
+}
+.quote-card:hover { border-color: var(--brand-dim); background: rgba(29, 155, 240, 0.05); }
+.quote-card .row-head { font-size: 12.5px; margin-bottom: 2px; }
+.quote-card .who { font-size: 13px; }
+.quote-text { font-size: 13.5px; color: var(--mut); word-break: break-word; overflow-wrap: anywhere; }
+.quote-card:hover .quote-text { color: var(--txt); }
+.quote-card.quote-missing { color: var(--mut2); font-size: 12.5px; font-style: italic; cursor: default; }
+.quote-card .row-media img { max-height: 200px; }
+
+/* X-style per-row action bar: reply 💬 · repost 🔁 · quote ❝ · permalink 🔗 with
+   live counts. Display-first — clicking copies the matching chimera_<verb> hint. */
+.row-actions { display: flex; align-items: center; gap: 16px; margin-top: 7px; }
+.actbtn {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: none; border: none; padding: 2px 4px; margin-left: -4px;
+  color: var(--mut2); font-size: 13px; line-height: 1; cursor: pointer;
+  border-radius: 999px; transition: color 0.12s, background 0.12s;
+}
+.actbtn .ac-n { font-size: 12px; font-weight: 700; }
+.act-reply:hover  { color: var(--brand); background: rgba(29, 155, 240, 0.10); }
+.act-repost:hover { color: var(--green); background: rgba(46, 204, 113, 0.10); }
+.act-quote:hover  { color: var(--accent); background: rgba(168, 85, 247, 0.10); }
+.act-link:hover   { color: var(--brand); background: rgba(29, 155, 240, 0.10); }
+.actbtn.copied { color: var(--green); }
 
 /* ── right rail cards ──────────────────────────────── */
 .card { border: 1px solid var(--line); border-radius: 14px; padding: 15px; margin-bottom: 16px; background: var(--panel); }
@@ -367,5 +423,33 @@ a.trend-name:hover { color: var(--accent); }
 .about-panel .muted { color: var(--mut2); }
 
 /* ── responsive ────────────────────────────────────── */
-@media (max-width: 1000px) { .app { grid-template-columns: 72px minmax(0,1fr); } .rail-right { display: none; } .logo span, .navitem span:not(.ni), .join-btn, .rail-foot { display: none; } .navitem { justify-content: center; } }
-@media (max-width: 600px) { .app { grid-template-columns: 1fr; } .rail-left { display: none; } .feed-col { border: none; } }
+/* tablet: drop the right rail, collapse the left rail to icons only */
+@media (max-width: 1000px) {
+  .app { grid-template-columns: 64px minmax(0, 1fr); max-width: 100%; }
+  .rail-right { display: none; }
+  .logo span, .navitem span:not(.ni), .join-btn, .rail-left .rail-foot { display: none; }
+  .navitem { justify-content: center; padding: 11px 0; }
+  .rail-left { padding: 16px 8px; }
+  .logo { justify-content: center; margin-bottom: 18px; }
+}
+/* phone: single column, no side rails, tighter gutters, everything wraps in-viewport.
+   feed-head goes static so the wrapping gold riskbar can't overlap it. */
+@media (max-width: 600px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  .rail-left { display: none; }
+  .feed-col { border: none; min-height: auto; }
+  .feed-head { position: static; top: auto; padding: 12px 14px; }
+  .feed-title { font-size: 17px; }
+  .hero, .banner { margin-left: 12px; margin-right: 12px; }
+  .row { padding: 12px 14px; gap: 10px; }
+  .searchbar, .commbar { padding-left: 12px; padding-right: 12px; }
+  .row-actions { gap: 13px; }
+  .row-head { font-size: 13px; }
+}
+/* small phones: trim avatars + action spacing so a row never forces width */
+@media (max-width: 380px) {
+  .row { padding: 11px; gap: 9px; }
+  .av, .av-wrap, .av-img, .av-rt { width: 38px; height: 38px; }
+  .row-actions { gap: 11px; }
+  .hero-copy { font-size: 13.5px; }
+}

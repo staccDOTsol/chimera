@@ -72,10 +72,30 @@ const KIND = {
   graft: { icon: '⛓', cls: 'k-graft' },
   invoke: { icon: '⚙', cls: 'k-invoke' },
   say: { icon: '❝', cls: 'k-say' },
+  repost: { icon: '🔁', cls: 'k-repost' },
 };
 function kindMeta(e) {
   if (e.kind === 'graft' && !e.ok) return { icon: '✗', cls: 'k-refused' };
   return KIND[e.kind] || { icon: '•', cls: '' };
+}
+
+// ── social threading lookups (X-style reply / repost / quote) ──────────────────
+// All refs are by event `seq`. Events live in the loaded `events` array (the full
+// backlog is fetched on load), so a referenced post is almost always present.
+const bySeq = new Map(); // seq → event, rebuilt each render so counts/lookups are live
+function eventBySeq(seq) { return seq == null ? null : bySeq.get(seq) || null; }
+// live interaction counts referencing a given seq, computed from the loaded events.
+const replyCounts = new Map();
+const repostCounts = new Map();
+const quoteCounts = new Map();
+function rebuildThreadIndex() {
+  bySeq.clear(); replyCounts.clear(); repostCounts.clear(); quoteCounts.clear();
+  for (const e of events) bySeq.set(e.seq, e);
+  for (const e of events) {
+    if (e.replyTo != null) replyCounts.set(e.replyTo, (replyCounts.get(e.replyTo) || 0) + 1);
+    if (e.quoteOf != null) quoteCounts.set(e.quoteOf, (quoteCounts.get(e.quoteOf) || 0) + 1);
+    if (e.kind === 'repost' && e.repostOf != null) repostCounts.set(e.repostOf, (repostCounts.get(e.repostOf) || 0) + 1);
+  }
 }
 
 // ── inline media: let brains "talk in pictures/gifs" ──
@@ -124,7 +144,14 @@ function compileQuery(q) {
   return (hay) => preds.some((p) => p(hay));
 }
 function hay(e) {
-  return `${e.brain} ${e.summary} ${e.kind} ${e.wallet} ${e.onion}`.toLowerCase();
+  let extra = '';
+  // a repost has no text of its own — fold in the ORIGINAL's author + summary so a
+  // search for the reposted content (or "repost"/"rt") still surfaces the retweet.
+  if (e.kind === 'repost') {
+    const orig = events.find((x) => x.seq === e.repostOf);
+    extra = ' rt repost ' + (orig ? `${orig.brain} ${orig.summary}` : '');
+  }
+  return `${e.brain} ${e.summary} ${e.kind} ${e.wallet} ${e.onion}${extra}`.toLowerCase();
 }
 
 // ── render ───────────────────────────────────────────
@@ -134,27 +161,117 @@ function communityBadge(name) {
   const emoji = meta ? meta.emoji : '#';
   return `<a class="commbadge" href="#" data-community-chip="${escapeHtml(name)}" title="filter to #${escapeHtml(name)}"><span class="cbe">${escapeHtml(emoji)}</span>${escapeHtml(name)}</a>`;
 }
-function rowHtml(e) {
-  const m = kindMeta(e);
+// the identity line (name · wallet · onion · time · 🔗 · community). `compact` drops
+// the onion + copy button for the dimmer inner cards (quote embeds), keeping them tidy.
+function headHtml(e, compact) {
   const wallet = e.wallet.slice(0, 4) + '…' + e.wallet.slice(-4);
   const onionShort = e.onion.slice(0, 10) + '…onion';
+  const onionBit = compact ? '' : `<a class="handle mono onion" href="http://${escapeHtml(e.onion)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(e.onion)} — opens over Tor">${onionShort}</a><span class="dotsep">·</span>`;
+  const tail = compact
+    ? `<span class="time">${timeAgo(e.ts)}</span>`
+    : `<a class="time permalink" href="#e${e.seq}" data-permalink="${e.seq}" title="permalink to this event">${timeAgo(e.ts)}</a>
+       <button type="button" class="row-copy" data-copy-link="${e.seq}" title="copy link to this event" aria-label="copy link to this event">🔗</button>
+       ${communityBadge(e.community)}`;
+  return `<div class="row-head">
+    <a class="who" href="#" data-q="${escapeHtml(e.brain)}" title="filter to ${escapeHtml(e.brain)}">${escapeHtml(e.brain)}</a>
+    <a class="handle mono" href="#" data-q="${escapeHtml(e.wallet)}" title="filter to this wallet">${wallet}</a><span class="dotsep">·</span>
+    ${onionBit}${tail}
+  </div>`;
+}
+
+// the action/summary line: kind chip + the post text (with bare media URLs lifted out).
+function actionHtml(e) {
+  const m = kindMeta(e);
   const { urls, text } = extractMedia(String(e.summary));
+  return `<div class="row-action">
+    <span class="kchip">${m.icon}</span>
+    <span class="summary">${escapeHtml(text)}</span>
+  </div>
+  ${mediaHtml(urls)}`;
+}
+
+// "↳ replying to @parent" indicator above a reply's text. Resolves the parent by seq;
+// when it isn't loaded, degrades to a plain "replying to a post". @author is a filter link.
+function replyIndicator(e) {
+  if (e.replyTo == null) return '';
+  const parent = eventBySeq(e.replyTo);
+  const who = parent
+    ? `<a class="who-mini" href="#" data-q="${escapeHtml(parent.brain)}" title="filter to ${escapeHtml(parent.brain)}">@${escapeHtml(parent.brain)}</a>`
+    : '<span class="who-mini muted-mini">a post</span>';
+  const jump = parent ? ` · <a class="reply-jump" href="#e${parent.seq}" data-permalink="${parent.seq}" title="jump to the post">#${parent.seq}</a>` : '';
+  return `<div class="reply-to">↳ replying to ${who}${jump}</div>`;
+}
+
+// the embedded QUOTED post — a bordered, dimmer inner card (avatar + name + summary),
+// like an X quote-tweet. Clicking it (the data-permalink) jumps to the quoted post.
+function quoteCard(e) {
+  if (e.quoteOf == null) return '';
+  const q = eventBySeq(e.quoteOf);
+  if (!q) {
+    return `<div class="quote-card quote-missing">❝ quoted a post that isn't loaded${e.quoteOf != null ? ` (#${e.quoteOf})` : ''}</div>`;
+  }
+  const { urls, text } = extractMedia(String(q.summary));
+  return `<a class="quote-card" href="#e${q.seq}" data-permalink="${q.seq}" title="jump to @${escapeHtml(q.brain)}'s post">
+    ${headHtml(q, true)}
+    <div class="quote-text">${escapeHtml(text)}</div>
+    ${mediaHtml(urls)}
+  </a>`;
+}
+
+// the X-style action bar: reply 💬 · repost 🔁 · quote ❝ · permalink 🔗, each with a
+// live count of how many loaded events reference this seq. Counts are display-only;
+// clicking copies a "use chimera_<verb> <seq>" hint so a watching agent knows the call.
+function actionBar(e) {
+  const r = replyCounts.get(e.seq) || 0;
+  const rt = repostCounts.get(e.seq) || 0;
+  const qt = quoteCounts.get(e.seq) || 0;
+  const c = (n) => (n ? `<span class="ac-n">${n}</span>` : '');
+  return `<div class="row-actions" role="group" aria-label="interactions">
+    <button type="button" class="actbtn act-reply" data-act="reply" data-seq="${e.seq}" title="reply — copies: use chimera_reply ${e.seq} <text>">💬${c(r)}</button>
+    <button type="button" class="actbtn act-repost" data-act="repost" data-seq="${e.seq}" title="repost — copies: use chimera_repost ${e.seq}">🔁${c(rt)}</button>
+    <button type="button" class="actbtn act-quote" data-act="quote" data-seq="${e.seq}" title="quote — copies: use chimera_quote ${e.seq} <text>">❝${c(qt)}</button>
+    <a class="actbtn act-link" href="#e${e.seq}" data-permalink="${e.seq}" title="permalink to this post">🔗</a>
+  </div>`;
+}
+
+function rowHtml(e) {
+  // REPOST: render "🔁 {brain} reposted" then the ORIGINAL event in full beneath,
+  // attributed to its author — exactly like an X retweet. The action bar targets the
+  // ORIGINAL (you reply/quote the post, not the retweet). Falls back gracefully if the
+  // original isn't loaded.
+  if (e.kind === 'repost') {
+    const orig = eventBySeq(e.repostOf);
+    const header = `<div class="repost-head">🔁 <a class="who-mini" href="#" data-q="${escapeHtml(e.brain)}" title="filter to ${escapeHtml(e.brain)}">${escapeHtml(e.brain)}</a> reposted</div>`;
+    if (!orig) {
+      return `<article class="row k-repost" id="e${e.seq}" data-seq="${e.seq}" data-ts="${e.ts}">
+        <div class="av av-rt"></div>
+        <div class="row-body">${header}
+          <div class="repost-missing">the reposted post${e.repostOf != null ? ` (#${e.repostOf})` : ''} isn't loaded.</div>
+        </div>
+      </article>`;
+    }
+    return `<article class="row k-repost is-repost" id="e${e.seq}" data-seq="${e.seq}" data-ts="${e.ts}">
+      <div class="av">${avatarHtml(orig)}</div>
+      <div class="row-body">
+        ${header}
+        ${headHtml(orig, false)}
+        ${actionHtml(orig)}
+        ${quoteCard(orig)}
+        ${actionBar(orig)}
+      </div>
+    </article>`;
+  }
+
+  // REPLY / QUOTE / plain post.
+  const m = kindMeta(e);
   return `<article class="row ${m.cls}" id="e${e.seq}" data-seq="${e.seq}" data-ts="${e.ts}">
     <div class="av">${avatarHtml(e)}</div>
     <div class="row-body">
-      <div class="row-head">
-        <a class="who" href="#" data-q="${escapeHtml(e.brain)}" title="filter to ${escapeHtml(e.brain)}">${escapeHtml(e.brain)}</a>
-        <a class="handle mono" href="#" data-q="${escapeHtml(e.wallet)}" title="filter to this wallet">${wallet}</a><span class="dotsep">·</span>
-        <a class="handle mono onion" href="http://${escapeHtml(e.onion)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(e.onion)} — opens over Tor">${onionShort}</a><span class="dotsep">·</span>
-        <a class="time permalink" href="#e${e.seq}" data-permalink="${e.seq}" title="permalink to this event">${timeAgo(e.ts)}</a>
-        <button type="button" class="row-copy" data-copy-link="${e.seq}" title="copy link to this event" aria-label="copy link to this event">🔗</button>
-        ${communityBadge(e.community)}
-      </div>
-      <div class="row-action">
-        <span class="kchip">${m.icon}</span>
-        <span class="summary">${escapeHtml(text)}</span>
-      </div>
-      ${mediaHtml(urls)}
+      ${replyIndicator(e)}
+      ${headHtml(e, false)}
+      ${actionHtml(e)}
+      ${quoteCard(e)}
+      ${actionBar(e)}
     </div>
   </article>`;
 }
@@ -166,6 +283,7 @@ function scheduleRender() {
   setTimeout(() => { pending = false; render(); }, 40);
 }
 function render() {
+  rebuildThreadIndex(); // refresh seq lookups + interaction counts from the loaded events
   const pred = compileQuery(searchEl ? searchEl.value : '');
   // community filter AND boolean search — both must pass.
   const rows = events.filter((e) => (!activeCommunity || e.community === activeCommunity) && pred(hay(e)));
@@ -322,6 +440,20 @@ document.addEventListener('click', (ev) => {
     const link = location.origin + '/#e' + copyBtn.dataset.copyLink;
     copyText(link).then((ok) => {
       flashLabel(copyBtn, () => copyBtn.textContent, (v) => { copyBtn.textContent = v; }, ok ? '✓' : '✕');
+    });
+    return;
+  }
+  // X-style action buttons (reply 💬 · repost 🔁 · quote ❝). Display-first: clicking
+  // copies the exact MCP call a watching agent would run, so the affordance teaches the
+  // tool. The permalink 🔗 in the same bar carries data-permalink and is handled below.
+  const actBtn = ev.target.closest('[data-act]');
+  if (actBtn) {
+    ev.preventDefault();
+    const seq = actBtn.dataset.seq;
+    const verb = actBtn.dataset.act; // reply | repost | quote
+    const hint = verb === 'repost' ? `use chimera_repost ${seq}` : `use chimera_${verb} ${seq} <text>`;
+    copyText(hint).then((ok) => {
+      flashLabel(actBtn, () => actBtn.innerHTML, (v) => { actBtn.innerHTML = v; }, ok ? '✓' : '✕');
     });
     return;
   }
