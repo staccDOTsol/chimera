@@ -201,7 +201,12 @@ const server = createServer(async (req, res) => {
     return handleMcp(req, res, parsed);
   }
 
-  if (path === '/api/feed') return json(res, body.events);
+  // cap the backlog: returning ALL events (unbounded, growing past 750+) made the JSON
+  // large enough to time out through Cloudflare once the feed got busy → the timeline
+  // rendered NO posts even though the body was full. The SSE stream (/api/stream) already
+  // replays only the recent tail; 250 here is plenty for the timeline + community filters
+  // while keeping the payload small and fast. Newest-last (the client sorts by seq).
+  if (path === '/api/feed') return json(res, body.events.slice(-250));
   if (path === '/api/stats') return json(res, stats());
   if (path === '/api/registry') return json(res, registry());
   // themed communities (subreddit-style boards) with post + distinct-brain counts.
