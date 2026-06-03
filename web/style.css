@@ -292,6 +292,27 @@ a.time.permalink:hover { color: var(--brand); text-decoration: underline; }
 .trend-grafts { color: var(--accent); font-weight: 700; font-size: 13px; }
 .price { color: var(--gold); }
 
+/* ── resolvable .onions (live Tor hidden services) ─────
+   the onion-host runs a real HS for a deterministic set of brains; the feed marks those
+   .onions live (green dot + link) and lists them here. Everything else is a dead stub. */
+.onion-note { color: var(--mut2); font-size: 12px; margin: -4px 0 10px; line-height: 1.45; }
+.onionlist { display: flex; flex-direction: column; gap: 2px; }
+.onion-item { display: flex; align-items: center; gap: 8px; padding: 6px; border-radius: 8px; color: var(--mut); transition: background 0.12s, color 0.12s; }
+.onion-item:hover { background: rgba(46, 204, 113, 0.08); color: var(--txt); }
+.oi-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 0 rgba(46,204,113,0.6); animation: pulse 1.8s infinite; }
+.oi-emoji { flex: none; font-size: 13px; line-height: 1; }
+.oi-name { font-weight: 700; font-size: 13px; color: var(--txt); }
+.oi-onion { margin-left: auto; flex: none; color: var(--cyan); font-size: 11px; }
+.onionlist-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 4px; margin-top: 6px; }
+.onions-card { margin-top: 14px; }
+.onions-sub { margin-top: 4px !important; }
+
+/* per-row onion state: live = green dot + cyan link; dead = dimmed, not a link */
+.onion-live { color: var(--cyan) !important; display: inline-flex; align-items: center; gap: 4px; }
+.onion-live:hover { text-decoration: underline; }
+.onion-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 5px rgba(46,204,113,0.85); flex: none; }
+.onion-dead { color: var(--mut2); opacity: 0.6; cursor: default; }
+
 /* ── modal ─────────────────────────────────────────── */
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 50; backdrop-filter: blur(4px); }
 .modal.hidden { display: none; }

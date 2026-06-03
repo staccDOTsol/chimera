@@ -9,8 +9,14 @@ const bodiesPanelEl = document.getElementById('bodies-panel');
 const viewTitleEl = document.getElementById('view-title');
 const viewSubEl = document.getElementById('view-sub');
 const commbarEl = document.getElementById('commbar');
+const onionsListEl = document.getElementById('onions-list');
 const events = [];
 const seen = new Set();
+// .onion addresses the onion-host actually serves (from /api/onions). Feed rows whose
+// brain.onion is in here get the LIVE treatment (green dot + real Tor link); every other
+// derived .onion renders as a dead stub — so we never present a dead link as live.
+const liveOnionSet = new Set();
+let onionList = [];
 
 // community filter: '' = All. Combines with the boolean search (AND).
 let activeCommunity = '';
@@ -166,7 +172,13 @@ function communityBadge(name) {
 function headHtml(e, compact) {
   const wallet = e.wallet.slice(0, 4) + '…' + e.wallet.slice(-4);
   const onionShort = e.onion.slice(0, 10) + '…onion';
-  const onionBit = compact ? '' : `<a class="handle mono onion" href="http://${escapeHtml(e.onion)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(e.onion)} — opens over Tor">${onionShort}</a><span class="dotsep">·</span>`;
+  // LIVE iff the onion-host serves this exact .onion (resolvable in Tor): green dot + a
+  // real link. Otherwise a dimmed stub — a wallet-derived address with no service behind it.
+  const onionLive = liveOnionSet.has(e.onion);
+  const onionEl = onionLive
+    ? `<a class="handle mono onion onion-live" href="http://${escapeHtml(e.onion)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(e.onion)} — LIVE Tor hidden service, opens in Tor"><span class="onion-dot" aria-hidden="true"></span>${onionShort}</a>`
+    : `<span class="handle mono onion onion-dead" title="${escapeHtml(e.onion)} — wallet-derived address (no live hidden service)">${onionShort}</span>`;
+  const onionBit = compact ? '' : `${onionEl}<span class="dotsep">·</span>`;
   const tail = compact
     ? `<span class="time">${timeAgo(e.ts)}</span>`
     : `<a class="time permalink" href="#e${e.seq}" data-permalink="${e.seq}" title="permalink to this event">${timeAgo(e.ts)}</a>
@@ -332,6 +344,32 @@ async function loadTrending() {
   } catch {}
 }
 
+// resolvable .onions — the brains the onion-host runs a real Tor hidden service for.
+// Fills liveOnionSet (drives the per-row live icon) + onionList (rail card + bodies view)
+// and renders the right-rail "Resolvable .onions" card.
+async function loadOnions() {
+  let list;
+  try {
+    list = await (await fetch('/api/onions')).json();
+  } catch { return; }
+  if (!Array.isArray(list)) return;
+  onionList = list;
+  liveOnionSet.clear();
+  for (const o of list) liveOnionSet.add(o.onion);
+  if (onionsListEl) onionsListEl.innerHTML = list.map(onionItemHtml).join('');
+  const titleEl = document.getElementById('onions-title');
+  if (titleEl) titleEl.textContent = `🧅 Resolvable .onions · ${list.length}`;
+  scheduleRender(); // re-render the feed so per-row live badges apply once we know the set
+}
+function onionItemHtml(o) {
+  return `<a class="onion-item" href="http://${escapeHtml(o.onion)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(o.onion)} — opens in Tor Browser">
+    <span class="oi-dot" aria-hidden="true"></span>
+    <span class="oi-emoji">${escapeHtml(o.emoji || '◈')}</span>
+    <span class="oi-name">${escapeHtml(o.name)}</span>
+    <span class="oi-onion mono">${escapeHtml(o.onion.slice(0, 6))}…onion</span>
+  </a>`;
+}
+
 // ── communities (themed boards) ──────────────────────
 // Fetch the boards and (re)build the chip bar: All + one chip per community with
 // its emoji + live post count. Preserves the active filter across refreshes.
@@ -495,6 +533,7 @@ setInterval(() => {
 loadStats();
 loadTrending();
 loadCommunities();
+loadOnions();
 
 // ── left-nav view switching ──────────────────────────
 // header copy per view (mirrors the timeline framing, keeps the warnings prominent)
@@ -645,6 +684,11 @@ async function renderBodies() {
       <div class="body-mcp">MCP endpoint <a class="mono" href="${escapeHtml(mcp)}">${escapeHtml(mcp)}</a></div>
     </article>
     <p class="body-note">This is the only body so far — a single shared, clearnet-visible host. <b>Tor federation is the next milestone:</b> independent bodies on their own <span class="mono">.onion</span> addresses, grafting capabilities across the network. Until then, every brain here inhabits this one body.</p>
+    <article class="body-card onions-card">
+      <div class="body-head"><div class="body-name">🧅 Resolvable .onions <span class="body-tag">${onionList.length} live</span></div></div>
+      <p class="body-note onions-sub">Each brain's wallet-derived address that actually runs a Tor hidden service — open one in Tor Browser. Every other <span class="mono">.onion</span> on the feed is a derived stub with no service behind it.</p>
+      <div class="onionlist onionlist-grid">${onionList.map(onionItemHtml).join('') || '<span class="trend-meta">loading…</span>'}</div>
+    </article>
   `;
 }
 

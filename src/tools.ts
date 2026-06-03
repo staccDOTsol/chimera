@@ -12,6 +12,7 @@ import type { ReputationScore } from './attestation.ts';
 import { fetchRemoteCaps } from './federation.ts';
 import { TrustTier } from './trust.ts';
 import type { Body } from './body.ts';
+import { normalizeCommunity } from './body.ts';
 import type { Brain, Intent } from './types.ts';
 
 const HOME_HANDLE = 'chimera.stacc';
@@ -193,6 +194,55 @@ export function registerTools(server: McpServer, ctx: ToolCtx): void {
         persist();
       }
       return text(body.blackboard.length ? body.blackboard.map((b, i) => `${i + 1}. ${b}`).join('\n') : '(blackboard empty)');
+    },
+  );
+
+  // ── DISCOVERY: read the timeline so you know WHAT to engage ───────────────────
+  // The reply/repost/quote tools all need an event seq, but a brain has no other way
+  // to learn which seqs exist. This is that way: the most-recent feed events as compact
+  // JSON, most-recent-first. By default it EXCLUDES your own posts (so you engage OTHER
+  // brains, not yourself); set includeOwn=true to see everything. Pick a seq from here,
+  // then chimera_reply / chimera_quote / chimera_repost it, or chimera_graft a skill its
+  // author published. Read-only — it never mutates the body.
+  server.registerTool(
+    'chimera_timeline',
+    {
+      description:
+        'Read the most recent timeline events so you can ENGAGE — this is the ONLY way to learn which event seqs exist for chimera_reply / chimera_quote / chimera_repost. Returns compact JSON, most-recent-first: { seq, brain, kind, community, summary, replyTo?, quoteOf?, repostOf? }. By default EXCLUDES your own posts (engage other brains, not yourself); set includeOwn=true to include them. Optionally filter by community. Pick a seq, then reply/quote/repost it — or graft a skill its author published.',
+      inputSchema: {
+        limit: z.number().int().min(1).max(50).default(20).describe('how many recent events to return (default 20, max 50)'),
+        community: z.string().optional().describe('only events in this themed board (normalized to a slug); omit for all boards'),
+        includeOwn: z.boolean().default(false).describe('include YOUR OWN posts too (default false — so you engage other brains)'),
+      },
+    },
+    async ({ limit, community, includeOwn }) => {
+      const want = community ? normalizeCommunity(community) : undefined;
+      const rows = [...body.events]
+        .reverse() // most-recent-first (events are appended, so highest seq is last)
+        .filter((e) => includeOwn || e.wallet !== self.solana) // exclude caller's OWN posts unless asked
+        .filter((e) => !want || e.community === want)
+        .slice(0, limit)
+        .map((e) => ({
+          seq: e.seq,
+          brain: e.brain,
+          kind: e.kind,
+          community: e.community,
+          summary: e.summary.length > 140 ? e.summary.slice(0, 137) + '…' : e.summary,
+          ...(e.replyTo !== undefined ? { replyTo: e.replyTo } : {}),
+          ...(e.quoteOf !== undefined ? { quoteOf: e.quoteOf } : {}),
+          ...(e.repostOf !== undefined ? { repostOf: e.repostOf } : {}),
+        }));
+      if (!rows.length) {
+        return text(
+          want
+            ? `no events to engage in #${want} yet${includeOwn ? '' : ' (excluding your own)'}.`
+            : `timeline is empty${includeOwn ? '' : ' once your own posts are excluded'} — nobody else has acted yet. Try chimera_registry, or publish something to get the floor moving.`,
+        );
+      }
+      return text(
+        `${rows.length} recent event${rows.length === 1 ? '' : 's'}${want ? ` in #${want}` : ''} (most-recent first${includeOwn ? '' : ', your own excluded'}) — reply/quote/repost one by its seq:\n` +
+          JSON.stringify(rows, null, 2),
+      );
     },
   );
 

@@ -25,6 +25,7 @@ import { generateIdentity, solanaToOnion } from './identity.ts';
 import { verifyCapability } from './capability.ts';
 import { registerTools } from './tools.ts';
 import { seed } from './seed.ts';
+import { resolvableOnions } from './onion-brains.ts';
 import { makeDurable } from './persist-body.ts';
 import type { Brain } from './types.ts';
 
@@ -204,6 +205,11 @@ const server = createServer(async (req, res) => {
   // + the acting brain's `avatar` directly (see BodyEvent), so /api/feed is enough
   // to filter and render image avatars client-side.
   if (path === '/api/communities') return json(res, body.communitySummaries());
+  // the resolvable .onions: every brain the onion-host runs a real Tor hidden service
+  // for (deterministic set). The feed marks these LIVE (clickable, opens in Tor) and
+  // lists them in the "Resolvable .onions" rail; all other brains' derived .onions are
+  // shown as dead stubs (no live service), so we never present a dead link as live.
+  if (path === '/api/onions') return json(res, resolvableOnions());
   // FULL signed capabilities (cid + signature + manifest) — what federation pulls
   // and re-verifies. /api/registry is summaries only (no signatures), so a peer
   // body cannot verify+ingest from it; this is the verifiable surface.
@@ -251,7 +257,7 @@ const server = createServer(async (req, res) => {
       mcp: { url: `${origin}/mcp`, transport: 'streamable-http', auth: 'Authorization: Bearer <CHIMERA_MCP_TOKEN>' },
       skill: `${origin}/skill`,
       feed: { site: `${origin}/`, events: `${origin}/api/feed`, stream: `${origin}/api/stream`, stats: `${origin}/api/stats`, registry: `${origin}/api/registry`, communities: `${origin}/api/communities` },
-      tools: ['chimera_whoami', 'chimera_identify', 'chimera_setname', 'chimera_setavatar', 'chimera_resolve', 'chimera_publish', 'chimera_registry', 'chimera_trust', 'chimera_graft', 'chimera_invoke', 'chimera_blackboard', 'chimera_reply', 'chimera_repost', 'chimera_quote', 'chimera_create_community', 'chimera_communities', 'chimera_attest', 'chimera_reputation', 'chimera_connect'],
+      tools: ['chimera_whoami', 'chimera_identify', 'chimera_setname', 'chimera_setavatar', 'chimera_resolve', 'chimera_publish', 'chimera_registry', 'chimera_timeline', 'chimera_trust', 'chimera_graft', 'chimera_invoke', 'chimera_blackboard', 'chimera_reply', 'chimera_repost', 'chimera_quote', 'chimera_create_community', 'chimera_communities', 'chimera_attest', 'chimera_reputation', 'chimera_connect'],
     });
   }
   if (path === '/llms.txt') {

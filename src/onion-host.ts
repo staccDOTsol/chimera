@@ -28,29 +28,10 @@ import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { identityFromSeed } from './identity.ts';
 import type { Identity } from './identity.ts';
-
-// the deterministic seed brains (must match src/seed.ts fixedIdentity bytes).
-const BRAINS: Array<{ name: string; byte?: number; seed?: Uint8Array; emoji?: string }> = [
-  { name: 'Leo', byte: 1 },
-  { name: 'Serpens', byte: 2 },
-  { name: 'Capra', byte: 3 },
-  { name: 'charmander', byte: 4, emoji: '🔥' },
-  { name: 'charizard', byte: 6, emoji: '🐉' },
-  { name: 'fomoxer', byte: 7, emoji: '💸' },
-  { name: 'stakemaxi', byte: 8 },
-  { name: 'pikabot', byte: 25, emoji: '⚡' },
-  { name: 'gengar', byte: 94, emoji: '👻' },
-  { name: 'bulbasaur', byte: 101, emoji: '🌱' },
-  { name: 'squirtle', byte: 107, emoji: '🐢' },
-  { name: 'eevee', byte: 133, emoji: '🦊' },
-  { name: 'snorlax', byte: 143, emoji: '😴' },
-];
-// live Railway agent-bots — stable identity from a hashed seed that matches each
-// bot's CHIMERA_SEED env. Distinct HS-dir names so they don't collide with the
-// deterministic seed brain of the same name.
-for (const bot of ['fomoxer', 'lamps', 'pumpmath', 'grafty', 'skillseeker']) {
-  BRAINS.push({ name: 'live-' + bot, seed: Uint8Array.from(createHash('sha256').update('twitmolt-bot:' + bot).digest()), emoji: '🤖' });
-}
+// the brains we run hidden services for come from the SHARED source of truth, so the
+// host and the clearnet feed (/api/onions, the "Resolvable .onions" rail + live icons)
+// can never disagree about which .onions actually resolve.
+import { ONION_BRAINS as BRAINS, brainSeed } from './onion-brains.ts';
 
 const TOR_BIN = process.env.TOR_BIN || 'tor';
 const WORK = process.env.ONION_HOST_DIR || join(tmpdir(), 'chimera-onions');
@@ -101,7 +82,7 @@ a{color:var(--brand)}.foot{margin-top:20px;color:var(--mut);font-size:12px}</sty
 <div class="face"><b>Solana wallet</b><span class="mono">${id.solana}</span></div>
 <div class="face"><b>Tor .onion</b><span class="mono">${id.onion}</span></div>
 <div class="face"><b>signer</b><span class="mono">same Ed25519 key</span></div>
-<div class="foot">This wallet-derived .onion is no longer a dead link — it <b>is</b> ${name}. Watch the body: <a href="https://chimera-stacc.fly.dev">chimera-stacc.fly.dev</a> / <span class="mono">chimera.stacc</span></div>
+<div class="foot">This wallet-derived .onion is no longer a dead link — it <b>is</b> ${name}. Watch the body: <a href="https://twitmolt.com">twitmolt.com</a> / <span class="mono">chimera.stacc</span></div>
 </div></body></html>`;
 }
 
@@ -115,7 +96,7 @@ let torrc = `DataDirectory ${torData}\nSocksPort 0\nLog notice stdout\n`;
 const expected: Array<{ name: string; onion: string; hsdir: string }> = [];
 
 BRAINS.forEach((b, i) => {
-  const id = identityFromSeed(b.seed ?? new Uint8Array(32).fill(b.byte!));
+  const id = identityFromSeed(brainSeed(b));
   const port = BASE_PORT + i;
   const hsdir = join(WORK, `hs-${b.name}`);
   mkdirSync(hsdir, { recursive: true, mode: 0o700 });
