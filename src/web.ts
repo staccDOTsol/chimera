@@ -50,13 +50,31 @@ if (!persist.restored) {
 }
 
 // ── live MCP sessions (each = one brain on the shared body) ──────────────────
-const sessions: Record<string, { transport: StreamableHTTPServerTransport; brain: Brain }> = {};
+const sessions: Record<string, { transport: StreamableHTTPServerTransport; brain: Brain; lastSeen: number }> = {};
 
 function makeSessionBrain(name: string | undefined): Brain {
   const identity = generateIdentity();
   const display = name && name.trim() ? name.trim() : 'anon-' + identity.solana.slice(0, 4);
   return { identity, adapter: { name: display, decide: () => ({ type: 'pass' }) }, trust: new TrustGraph(), grafted: new Set() };
 }
+
+// reap idle MCP sessions. Streamable-HTTP sessions persist until explicitly closed, but
+// the bots reconnect every loop and exit WITHOUT a clean DELETE, so dead sessions piled
+// up — inflating brains/online to count RECONNECTIONS, not agents (145 sessions ≈ 5 real
+// agents). Drop any session with no request in 3min and remove its brain from the body.
+const SESSION_IDLE_MS = 3 * 60 * 1000;
+const reaper = setInterval(() => {
+  const now = Date.now();
+  for (const [id, s] of Object.entries(sessions)) {
+    if (now - s.lastSeen > SESSION_IDLE_MS) {
+      body.brains = body.brains.filter((b) => b !== s.brain);
+      delete sessions[id];
+      try { s.transport.close(); } catch { /* already gone */ }
+      console.error(`- reaped idle "${s.brain.adapter.name}"  online=${Object.keys(sessions).length}`);
+    }
+  }
+}, 60_000);
+if (typeof reaper.unref === 'function') reaper.unref();
 
 async function handleMcp(req: IncomingMessage, res: ServerResponse, parsed: unknown): Promise<void> {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -75,6 +93,7 @@ async function handleMcp(req: IncomingMessage, res: ServerResponse, parsed: unkn
   const sid = req.headers['mcp-session-id'] as string | undefined;
 
   if (sid && sessions[sid]) {
+    sessions[sid].lastSeen = Date.now();
     return sessions[sid].transport.handleRequest(req, res, parsed);
   }
 
@@ -85,7 +104,7 @@ async function handleMcp(req: IncomingMessage, res: ServerResponse, parsed: unkn
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       onsessioninitialized: (id: string) => {
-        sessions[id] = { transport, brain };
+        sessions[id] = { transport, brain, lastSeen: Date.now() };
         body.addBrain(brain);
         console.error(`+ brain "${brain.adapter.name}" joined (${brain.identity.solana.slice(0, 8)}…)  online=${Object.keys(sessions).length + 1}`);
       },
@@ -116,7 +135,11 @@ function stats() {
     if (e.kind === 'graft' && e.ok) grafts++;
     if (typeof e.data.paidMicroUsdc === 'number') settled += e.data.paidMicroUsdc as number;
   }
-  return { bodies: 1, brains: body.brains.length, online: Object.keys(sessions).length, capabilities: [...body.registry.values()].filter((c) => verifyCapability(c)).length, grafts, settledMicroUsdc: settled, events: body.events.length };
+  // count UNIQUE agent identities (by wallet), not connection sessions — a brain that
+  // reconnects N times is ONE agent, not N. online = distinct wallets currently connected.
+  const brains = new Set(body.brains.map((b) => b.identity.solana)).size;
+  const online = new Set(Object.values(sessions).map((s) => s.brain.identity.solana)).size;
+  return { bodies: 1, brains, online, capabilities: [...body.registry.values()].filter((c) => verifyCapability(c)).length, grafts, settledMicroUsdc: settled, events: body.events.length };
 }
 function registry() {
   const g = new Map<string, number>();
