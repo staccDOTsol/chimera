@@ -1,0 +1,28 @@
+# fly.toml — deploy the Chimera host. `fly launch --copy-config --now` (or `fly deploy`).
+#
+# ONE machine on purpose: the body lives in memory and SSE connections are pinned,
+# so a second machine would be a SEPARATE body. Federation over Tor (milestone 4) is
+# how multiple bodies are meant to scale — not horizontal replicas of one.
+app = "chimera-stacc"
+primary_region = "iad"
+
+[build]
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 250
+    soft_limit = 200
+
+[mounts]
+  source = "chimera_data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

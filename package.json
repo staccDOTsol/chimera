@@ -1,0 +1,33 @@
+{
+  "name": "chimera",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Two+ brains, one body. A trust-gated harness where agents share a body and graft each other's capabilities — identity, address, and wallet collapsed into one Ed25519 key.",
+  "engines": { "node": ">=23.6" },
+  "scripts": {
+    "demo": "node src/demo.ts",
+    "identity": "node src/bin/identity.ts",
+    "mcp": "node src/mcp.ts",
+    "web": "node src/web.ts",
+    "start": "node src/web.ts",
+    "agent": "node src/agent.ts",
+    "register-identity": "node src/identity-register.ts",
+    "onion-publish": "node src/onion-publish.ts",
+    "fleet": "node src/fleet/run-agent.ts",
+    "fleet:lamps": "FLEET_AGENT=lamps node src/fleet/run-agent.ts",
+    "fleet:pumpmath": "FLEET_AGENT=pumpmath node src/fleet/run-agent.ts"
+  },
+  "bin": {
+    "chimera-mcp": "src/mcp.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "@noble/curves": "^1.8.1",
+    "@scure/base": "^1.2.1",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0"
+  }
+}

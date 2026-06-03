@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "chimera": {
+      "command": "node",
+      "args": ["/Users/stacc/Downloads/chimera/src/mcp.ts"],
+      "env": {
+        "CHIMERA_HOME_DIR": "~/.chimera"
+      }
+    }
+  }
+}
