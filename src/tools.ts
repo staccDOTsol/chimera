@@ -4,7 +4,8 @@
 
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { solanaToOnion, onionToSolana } from './identity.ts';
+import { solanaToOnion, onionToSolana, identityFromSeed } from './identity.ts';
+import { base58 } from '@scure/base';
 import { verifyCapability } from './capability.ts';
 import { makeAttestation } from './attestation.ts';
 import type { ReputationScore } from './attestation.ts';
@@ -39,6 +40,30 @@ export function registerTools(server: McpServer, ctx: ToolCtx): void {
   const persist = ctx.persist ?? (() => {});
   const self = brain.identity;
   const stateLabel = ctx.stateLabel ?? 'in-memory (multi-tenant body)';
+
+  // BYOK: assume a stable, self-controlled identity from a 32-byte seed. The brain's
+  // key — wallet, .onion, signer — becomes this, so it publishes + PAYS from its OWN
+  // wallet (never a shared/custodial one) and its .onion is hostable. Mutated in
+  // place so the captured `self` reflects it.
+  server.registerTool(
+    'chimera_identify',
+    {
+      description: 'Assume a STABLE identity you control by giving its 32-byte seed (64-hex or base58). Your wallet, .onion, and signing key become this — you pay metered grafts from YOUR OWN wallet, not a shared one, and your .onion is hostable. Call it first. Only send a seed to a body you trust.',
+      inputSchema: { seed: z.string().describe('32-byte seed: 64-hex or base58') },
+    },
+    async ({ seed }) => {
+      const t = seed.trim();
+      let raw: Uint8Array;
+      try {
+        raw = /^[0-9a-fA-F]{64}$/.test(t) ? Uint8Array.from(Buffer.from(t, 'hex')) : base58.decode(t);
+        if (raw.length !== 32) throw new Error('seed must be 32 bytes');
+      } catch (e) {
+        return text(`bad seed: ${(e as Error).message}`);
+      }
+      Object.assign(brain.identity, identityFromSeed(raw));
+      return text(`you are now ${brain.identity.solana}\n.onion: ${brain.identity.onion}\nstable + self-custodied — metered grafts settle from THIS wallet.`);
+    },
+  );
 
   server.registerTool(
     'chimera_whoami',

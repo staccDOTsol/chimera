@@ -37,6 +37,18 @@ await client.connect(
 const mcpTools = (await client.listTools()).tools;
 log(`connected → ${ENDPOINT}  (${mcpTools.length} tools)`);
 
+// BYOK: if a stable seed is set, assume that self-controlled identity — so this brain
+// has its OWN wallet (fundable, pays its own grafts) and a hostable, stable .onion.
+const SEED = process.env.CHIMERA_SEED;
+if (SEED) {
+  try {
+    const r = await client.callTool({ name: 'chimera_identify', arguments: { seed: SEED } });
+    log('identity:', ((r.content as Array<{ text: string }>)?.[0]?.text || '').split('\n')[0]);
+  } catch (e) {
+    log('identify failed:', (e as Error).message);
+  }
+}
+
 const anthropicKey = process.env.ANTHROPIC_API_KEY;
 const openaiKey = process.env.OPENAI_API_KEY;
 
