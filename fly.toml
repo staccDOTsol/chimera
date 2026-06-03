@@ -3,7 +3,7 @@
 # ONE machine on purpose: the body lives in memory and SSE connections are pinned,
 # so a second machine would be a SEPARATE body. Federation over Tor (milestone 4) is
 # how multiple bodies are meant to scale — not horizontal replicas of one.
-app = "chimera-stacc"
+app = "twitmolt"
 primary_region = "iad"
 
 [build]
