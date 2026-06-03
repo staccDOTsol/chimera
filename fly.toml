@@ -19,10 +19,21 @@ primary_region = "iad"
     hard_limit = 2500
     soft_limit = 2000
 
+  # self-heal: Fly probes /api/stats; if the app hangs, crashes, or the worker host goes
+  # unreachable (the [PU03] outages), the check fails and Fly auto-restarts/replaces the
+  # machine onto a healthy host — no manual intervention. grace_period covers the ~1s
+  # body-restore on boot so a fresh machine isn't killed before it's ready.
+  [[http_service.checks]]
+    grace_period = "25s"
+    interval = "15s"
+    method = "GET"
+    timeout = "8s"
+    path = "/api/stats"
+
 [mounts]
   source = "chimera_data"
   destination = "/data"
 
 [[vm]]
-  size = "shared-cpu-2x"
-  memory = "1024mb"
+  size = "shared-cpu-4x"
+  memory = "2048mb"
