@@ -10,10 +10,24 @@ window it was live) as evidence; it does **not** locate, contact, enrich, or fur
 the target. Use the output to report to platform Trust & Safety and — where the content
 warrants — NCMEC, FBI IC3, or UK Action Fraud.
 
+## Sources
+
+`BOUNTIES_SOURCE` selects where bounties come from:
+
+- **`onchain` (default, recommended)** — reads every bounty escrow account straight off
+  Solana via `getProgramAccounts` on the bounty program
+  `goGzNYTYkSEe4hUqz6dPmY5uf3CTt36AQAoujXDrKiV`. **Permissionless, un-deletable, no
+  Cloudflare.** The on-chain create instruction stores a *metadata URL*
+  (`https://pump.fun/bounties/<uuid>`) — the human title/description lives off-chain there,
+  so it's fetched best-effort (Cloudflare-gated; set `BOUNTIES_COOKIE` to unlock). The index
+  itself (creator, escrow value, timestamp, metadata link) never depends on that fetch.
+- **`browser`** — headless Chromium that clears Cloudflare to scrape go.pump.fun directly.
+- **`http`** — raw go.pump.fun API scrape (usually Cloudflare-blocked).
+
 ## Run
 
 ```bash
-# one pass → writes data/bounties/report.md (+ index.json evidence store)
+# one pass → writes data/bounties/report.md (+ index.json evidence store). Default = onchain.
 pnpm bounties
 
 # reindex forever, capturing newly-posted bounties even if deleted minutes later

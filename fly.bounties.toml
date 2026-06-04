@@ -4,14 +4,27 @@
 #   fly volumes create bounties_data --size 3 --region iad
 #   fly deploy --config fly.bounties.toml
 #
-# No http_service: this is a background worker, not a server. The machine stays up and
-# runs the reindex loop; the evidence store lives on the bounties_data volume so captured
-# bounties (incl. ones pump.fun later deletes) survive restarts and redeploys.
+# The machine runs the reindex loop AND serves a live SSE dashboard (see src/bounties/
+# server.ts) on the same process. The evidence store lives on the bounties_data volume so
+# captured bounties (incl. ones pump.fun later deletes) survive restarts and redeploys.
 app = "twitmolt-bounties"
 primary_region = "iad"
 
 [build]
   dockerfile = "Dockerfile.bounties"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"   # a worker — never stop it, or indexing stops
+  auto_start_machines = true
+  min_machines_running = 1
+  [[http_service.checks]]
+    grace_period = "30s"
+    interval = "15s"
+    method = "GET"
+    timeout = "8s"
+    path = "/api/stats"
 
 [env]
   BOUNTIES_BROWSER = "1"
