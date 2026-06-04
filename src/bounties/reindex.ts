@@ -16,6 +16,7 @@ import { rankBounties } from './score.ts';
 import { renderMarkdown } from './report.ts';
 import { BountyStore } from './store.ts';
 import { bus } from './events.ts';
+import { getSolPriceUsd } from './price.ts';
 import type { Bounty } from './types.ts';
 
 const OUT_DIR = process.env.BOUNTIES_OUT_DIR || './data/bounties';
@@ -65,14 +66,24 @@ async function pass(store: BountyStore, source: Source): Promise<void> {
   const worst = ranked[0];
 
   // Feed the live dashboard: snapshot for new clients + per-event stream.
+  const solPriceUsd = await getSolPriceUsd();
+  const rewardSol = ranked.reduce((s, r) => s + Number((r.bounty.raw as any)?.rewardSol || 0), 0);
+  const rewardUsd = rewardSol * solPriceUsd;
+  const categories = flagged.reduce<Record<string, number>>((a, r) => {
+    for (const c of new Set(r.hits.map((h) => h.category))) a[c] = (a[c] ?? 0) + 1; return a;
+  }, {});
+  const newest = ranked.map((r) => r.bounty.createdAt).filter(Boolean).sort().at(-1);
   const stats = { fetchedAt, total: ranked.length, flagged: flagged.length,
-    counts: flagged.reduce<Record<string, number>>((a, r) => ((a[r.tier] = (a[r.tier] ?? 0) + 1), a), {}) };
+    rewardSol: Number(rewardSol.toFixed(3)), rewardUsd: Number(rewardUsd.toFixed(2)), solPriceUsd, newest,
+    counts: flagged.reduce<Record<string, number>>((a, r) => ((a[r.tier] = (a[r.tier] ?? 0) + 1), a), {}),
+    categories };
   bus.setSnapshot(flagged, stats);
   for (const r of flagged) {
     if (!before.has(r.bounty.id)) bus.emit({ type: 'flagged', scored: r }); // newly-seen & flagged
   }
   bus.emit({ type: 'pass', ts: fetchedAt, fetched: fresh.length, added: delta.added,
     updated: delta.updated, gone: delta.gone, flagged: flagged.length, total: ranked.length,
+    rewardSol: stats.rewardSol, rewardUsd: stats.rewardUsd, solPriceUsd, counts: stats.counts, categories, newest,
     top: worst ? { score: worst.score, tier: worst.tier, rationale: worst.rationale } : null });
 
   console.log(

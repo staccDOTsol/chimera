@@ -82,6 +82,15 @@ const PAGE = /* html */ `<!doctype html>
   .pill{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:12px;color:var(--mut)}
   .pill b{color:var(--fg)}
   main{padding:16px 18px;max-width:1100px;margin:0 auto}
+  .summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:0 0 16px}
+  .summary .stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:11px 13px}
+  .summary .wide{grid-column:1/-1}
+  .summary .k{color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+  .summary .v{font-size:22px;font-weight:700;margin-top:3px;font-variant-numeric:tabular-nums}
+  .summary .ksub{color:var(--mut);font-size:11.5px;margin-top:2px}
+  .summary .v.cats{font-size:13px;font-weight:500;line-height:1.7}
+  .summary .v.cats span{display:inline-block;background:#1b2230;border:1px solid var(--line);border-radius:6px;padding:1px 8px;margin:2px 4px 2px 0;color:#cdd5e3}
+  @media(max-width:680px){.summary{grid-template-columns:repeat(2,1fr)}}
   .feed{display:flex;flex-direction:column;gap:10px}
   .b{background:var(--card);border:1px solid var(--line);border-left-width:4px;border-radius:10px;padding:11px 13px}
   .b .top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
@@ -113,7 +122,14 @@ const PAGE = /* html */ `<!doctype html>
   </div>
 </header>
 <main>
-  <p class="note">Live abuse index of go.pump.fun bounties, ranked by harm severity. Captured for reporting (platform T&S / NCMEC / IC3 / Action Fraud). Named targets are victims — do not contact or expose them.</p>
+  <p class="note">Live abuse index of pump.fun bounties — enumerated on-chain (program <code>goGz…KiV</code>, un-deletable) and ranked by harm severity. Captured for reporting (platform T&S / NCMEC / IC3 / Action Fraud). Named targets are victims — do not contact or expose them.</p>
+  <section id="summary" class="summary">
+    <div class="stat"><div class="k">bounties indexed</div><div class="v" id="sTotal">—</div></div>
+    <div class="stat"><div class="k">total reward pool</div><div class="v" id="sUsd">—</div><div class="ksub" id="sSol">—</div></div>
+    <div class="stat"><div class="k">flagged</div><div class="v" id="sFlagged">—</div></div>
+    <div class="stat"><div class="k">newest bounty</div><div class="v" id="sNewest">—</div><div class="ksub" id="sPrice">—</div></div>
+    <div class="stat wide"><div class="k">harm breakdown</div><div class="v cats" id="sCats">—</div></div>
+  </section>
   <div id="feed" class="feed"><div class="empty" id="empty">waiting for the first index pass…</div></div>
 </main>
 <script>
@@ -132,7 +148,7 @@ function card(r){
     +'<div class="cats">'+esc(cats)+(r.targetsNamedPerson?' · <b style="color:#ff9a9a">named target</b>':'')+'</div>'
     +'<div class="rat">'+esc(r.rationale||'')+'</div>'
     +'<div class="meta">'+(r.bounty.author?'<span>by '+esc(r.bounty.author)+'</span>':'')
-    +(r.bounty.reward?'<span>'+esc(r.bounty.reward)+'</span>':'')+'<span>report: '+esc((r.reportTo||[]).join('; '))+'</span>'+link+'</div>';
+    +(r.bounty.reward?'<span>💰 '+esc(r.bounty.reward)+(r.bounty.raw&&r.bounty.raw.rewardSol&&SOLP?' (~'+usd(r.bounty.raw.rewardSol*SOLP)+')':'')+'</span>':'')+'<span>report: '+esc((r.reportTo||[]).join('; '))+'</span>'+link+'</div>';
   if(!el){el=document.createElement('div');el.id=id;el.className='b '+r.tier+' new';el.innerHTML=html;}
   else{el.className='b '+r.tier;el.innerHTML=html;}
   return el;
@@ -144,11 +160,24 @@ function render(){
   feed.replaceChildren(...rows.map(card));counts();
 }
 function upsert(r){if(r.tier==='BENIGN')return;byId.set(r.bounty.id,r);}
+const CATLABEL={csam_or_minor_sexual:'CSAM/minor',violence_solicitation:'violence',targeted_threat:'targeted threat',doxxing_pii:'doxxing',sexual_exploitation:'sexual exploit',harassment_named:'harassment',hate_protected:'hate',property_or_fraud_crime:'fraud/property',self_harm:'self-harm',other_flag:'other'};
+let SOLP=0;
+const usd=n=>'$'+Number(n).toLocaleString(undefined,{maximumFractionDigits:0});
+function summarize(s){if(!s)return;
+  if(s.solPriceUsd)SOLP=s.solPriceUsd;
+  if(s.total!=null){sTotal.textContent=s.total;cTotal.textContent=s.total;}
+  if(s.rewardUsd!=null)sUsd.textContent=usd(s.rewardUsd);
+  if(s.rewardSol!=null)sSol.textContent=Number(s.rewardSol).toLocaleString(undefined,{maximumFractionDigits:1})+' SOL';
+  if(SOLP)sPrice.textContent='SOL ≈ $'+SOLP.toLocaleString(undefined,{maximumFractionDigits:2});
+  if(s.flagged!=null)sFlagged.textContent=s.flagged;
+  if(s.newest)sNewest.textContent=new Date(s.newest).toLocaleDateString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+  if(s.categories){const ent=Object.entries(s.categories).sort((a,b)=>b[1]-a[1]);
+    sCats.innerHTML=ent.length?ent.map(([k,v])=>'<span>'+esc(CATLABEL[k]||k)+' '+v+'</span>').join(''):'—';}
+}
 const es=new EventSource('/events');
-es.addEventListener('snapshot',e=>{const d=JSON.parse(e.data);(d.ranked||[]).forEach(upsert);render();
-  if(d.stats&&d.stats.total!=null)cTotal.textContent=d.stats.total;});
+es.addEventListener('snapshot',e=>{const d=JSON.parse(e.data);(d.ranked||[]).forEach(upsert);render();summarize(d.stats);});
 es.addEventListener('flagged',e=>{upsert(JSON.parse(e.data).scored);render();});
-es.addEventListener('pass',e=>{const d=JSON.parse(e.data);cTotal.textContent=d.total??cTotal.textContent;
+es.addEventListener('pass',e=>{const d=JSON.parse(e.data);summarize(d);
   document.getElementById('status').textContent='last pass '+new Date(d.ts).toLocaleTimeString()+' · fetched '+d.fetched+' · flagged '+d.flagged;});
 es.onopen=()=>{dot.className='dot live';if(status.textContent==='connecting…')status.textContent='connected — waiting for a pass';};
 es.onerror=()=>{dot.className='dot dead';};

@@ -174,7 +174,11 @@ export class OnchainBountySource {
       const pubkey = a.pubkey;
       const raw = base58Bytes(a.account.data[0]);
       const creator = raw ? pk(raw, 8) : undefined;
-      const escrowSol = (a.account.lamports / LAMPORTS).toFixed(4);
+      // reward pool amount lives at offset 105 (u64 lamports) — validated against the live
+      // UI (e.g. 4,800,000,000 = 4.8 SOL). The account's own lamports are just rent.
+      const rewardSol = raw && raw.length >= 113
+        ? Number(new DataView(raw.buffer, raw.byteOffset, raw.byteLength).getBigUint64(105, true)) / LAMPORTS
+        : 0;
 
       // resolve text once per bounty, capped per pass to respect RPC limits
       let r = this.cache.get(pubkey);
@@ -191,9 +195,9 @@ export class OnchainBountySource {
         title: r.title,
         description: r.description,
         author: creator,
-        reward: r.reward ?? `${escrowSol} SOL escrow`,
+        reward: rewardSol > 0 ? `${rewardSol} SOL` : (r.reward ?? '—'),
         createdAt: r.createdAt,
-        raw: { lamports: a.account.lamports, program: PROGRAM, uuid: r.uuid, account: pubkey },
+        raw: { lamports: a.account.lamports, program: PROGRAM, uuid: r.uuid, account: pubkey, rewardSol },
       });
     }
     if (resolvedThisPass) await this.saveCache();
