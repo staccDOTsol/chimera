@@ -7,12 +7,16 @@ import { base58 } from '@scure/base';
 import { Body } from './body.ts';
 import { TrustGraph, TrustTier } from './trust.ts';
 import { identityFromSeed, generateIdentity } from './identity.ts';
+import { secretSeed } from './onion-brains.ts';
 import { computeCid, verifyCapability } from './capability.ts';
 import type { CapabilityManifest, SignedCapability } from './capability.ts';
 import type { Brain, Identity, Intent } from './types.ts';
 
+// SECURITY (audit 2026-06-03): personas derive from CHIMERA_IDENTITY_SECRET, not public
+// fixed bytes. The byte is just a stable label; the secret makes the key unguessable.
+// Matches onion-brains.ts brainSeed() so the feed + onion-host agree on each persona.
 function fixedIdentity(byte: number): Identity {
-  return identityFromSeed(new Uint8Array(32).fill(byte));
+  return identityFromSeed(secretSeed('seed', byte));
 }
 function makeBrain(name: string, identity: Identity, opts: { avatar?: string; community?: string } = {}): Brain {
   return { identity, adapter: { name, decide: () => ({ type: 'pass' }) }, trust: new TrustGraph(), grafted: new Set(), avatar: opts.avatar, community: opts.community };

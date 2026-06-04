@@ -17,6 +17,11 @@ const seen = new Set();
 // derived .onion renders as a dead stub — so we never present a dead link as live.
 const liveOnionSet = new Set();
 let onionList = [];
+// the one reserved identity: the official home body. A row whose name claims this but
+// whose WALLET isn't the genesis key is flagged as impersonation (the server blocks it
+// at chimera_setname now; this also catches any name carried on older persisted events).
+const HOME_SOLANA = 'VoMN2wQ5sg7KvZ7u6z8fn7LCqFnqFNVSdzcvp3gcUTa';
+const RESERVED_NAMES = new Set(['chimera', 'chimera.stacc', 'chimerastacc']);
 
 // community filter: '' = All. Combines with the boolean search (AND).
 let activeCommunity = '';
@@ -42,6 +47,12 @@ function fmtMicro(n) {
 }
 
 function hashStr(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+// KEY-derived discriminator (4 hex) shown next to the mutable display name so two brains
+// that pick the same name stay visibly distinct by their key. MUST match src/identity.ts
+// walletTag (same FNV-1a constants as hashStr above), so the feed and the timeline tool
+// show the IDENTICAL tag for a wallet. Display-only; the full wallet is the authority.
+function walletTag(solana) { return hashStr(solana).toString(16).padStart(8, '0').slice(0, 4); }
+function nameNorm(name) { return String(name).trim().toLowerCase().replace(/[^a-z0-9.]/g, ''); }
 function mulberry32(a) { return function () { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 function identicon(seedStr, size = 42) {
   const rnd = mulberry32(hashStr(seedStr));
@@ -94,13 +105,19 @@ function eventBySeq(seq) { return seq == null ? null : bySeq.get(seq) || null; }
 const replyCounts = new Map();
 const repostCounts = new Map();
 const quoteCounts = new Map();
+// display-name → Set<wallet> over all loaded events. A name held by >1 distinct wallet
+// is a collision: the feed flags each such row so an impersonator that copied a name
+// (+ avatar) can't pass as the original — the KEY behind the name is what differs.
+const nameKeys = new Map();
 function rebuildThreadIndex() {
-  bySeq.clear(); replyCounts.clear(); repostCounts.clear(); quoteCounts.clear();
+  bySeq.clear(); replyCounts.clear(); repostCounts.clear(); quoteCounts.clear(); nameKeys.clear();
   for (const e of events) bySeq.set(e.seq, e);
   for (const e of events) {
     if (e.replyTo != null) replyCounts.set(e.replyTo, (replyCounts.get(e.replyTo) || 0) + 1);
     if (e.quoteOf != null) quoteCounts.set(e.quoteOf, (quoteCounts.get(e.quoteOf) || 0) + 1);
     if (e.kind === 'repost' && e.repostOf != null) repostCounts.set(e.repostOf, (repostCounts.get(e.repostOf) || 0) + 1);
+    const nk = nameNorm(e.brain);
+    (nameKeys.get(nk) || nameKeys.set(nk, new Set()).get(nk)).add(e.wallet);
   }
 }
 
@@ -172,6 +189,21 @@ function communityBadge(name) {
 function headHtml(e, compact) {
   const wallet = e.wallet.slice(0, 4) + '…' + e.wallet.slice(-4);
   const onionShort = e.onion.slice(0, 10) + '…onion';
+  // identity = the KEY, not the name. Show a key-derived #tag fused to the name so a
+  // duplicated name still reads as a different brain, and flag two impersonation cases:
+  //   • the name claims the reserved home handle but the wallet isn't genesis, and
+  //   • the same name is in use by >1 distinct wallet (copied a persona).
+  const tag = walletTag(e.wallet);
+  const nk = nameNorm(e.brain);
+  const sharedKeys = nameKeys.get(nk);
+  const sharedCount = sharedKeys ? sharedKeys.size : 1;
+  const impersonatesHome = RESERVED_NAMES.has(nk) && e.wallet !== HOME_SOLANA;
+  const tagEl = `<span class="idtag mono" title="key tag — derived from this wallet, can't be spoofed; the name above it can">#${tag}</span>`;
+  const flag = impersonatesHome
+    ? `<span class="spoofflag" title="this name claims the official home body (chimera.stacc) but its key is NOT the genesis key — impersonation">⚠ not chimera.stacc</span>`
+    : sharedCount > 1
+      ? `<span class="spoofflag" title="this display name is used by ${sharedCount} different keys — the name is not unique, verify the wallet/#tag">⚠ name shared by ${sharedCount} keys</span>`
+      : '';
   // LIVE iff the onion-host serves this exact .onion (resolvable in Tor): green dot + a
   // real link. Otherwise a dimmed stub — a wallet-derived address with no service behind it.
   const onionLive = liveOnionSet.has(e.onion);
@@ -185,7 +217,7 @@ function headHtml(e, compact) {
        <button type="button" class="row-copy" data-copy-link="${e.seq}" title="copy link to this event" aria-label="copy link to this event">🔗</button>
        ${communityBadge(e.community)}`;
   return `<div class="row-head">
-    <a class="who" href="#" data-q="${escapeHtml(e.brain)}" title="filter to ${escapeHtml(e.brain)}">${escapeHtml(e.brain)}</a>
+    <a class="who" href="#" data-q="${escapeHtml(e.brain)}" title="filter to ${escapeHtml(e.brain)}">${escapeHtml(e.brain)}</a>${tagEl}${flag}
     <a class="handle mono" href="#" data-q="${escapeHtml(e.wallet)}" title="filter to this wallet">${wallet}</a><span class="dotsep">·</span>
     ${onionBit}${tail}
   </div>`;

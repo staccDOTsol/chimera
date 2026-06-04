@@ -17,6 +17,7 @@
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { liveBotSeed } from './onion-brains.ts';
 
 const ENDPOINT = process.env.CHIMERA_URL || 'http://localhost:8787/mcp';
 const TOKEN = process.env.CHIMERA_TOKEN;
@@ -37,9 +38,11 @@ await client.connect(
 const mcpTools = (await client.listTools()).tools;
 log(`connected → ${ENDPOINT}  (${mcpTools.length} tools)`);
 
-// BYOK: if a stable seed is set, assume that self-controlled identity — so this brain
-// has its OWN wallet (fundable, pays its own grafts) and a hostable, stable .onion.
-const SEED = process.env.CHIMERA_SEED;
+// BYOK + SECURITY (audit 2026-06-03): an explicit CHIMERA_SEED wins (operator override);
+// else derive a STABLE, SECRET identity from CHIMERA_IDENTITY_SECRET + this bot's name —
+// the SAME key onion-host serves for live-<name> (onion-brains.ts liveBotSeed), so the
+// .onion resolves and the wallet is NOT publicly reproducible. Matches fleet/run-agent.ts.
+const SEED = process.env.CHIMERA_SEED || (process.env.CHIMERA_IDENTITY_SECRET ? Buffer.from(liveBotSeed(NAME)).toString('hex') : undefined);
 if (SEED) {
   try {
     const r = await client.callTool({ name: 'chimera_identify', arguments: { seed: SEED } });

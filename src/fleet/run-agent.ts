@@ -32,6 +32,7 @@ import { spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getAgent, FLEET } from './fleet.ts';
+import { liveBotSeed } from '../onion-brains.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const AGENT_SCRIPT = join(HERE, '..', 'agent.ts'); // src/agent.ts
@@ -73,6 +74,20 @@ function composedGoal(): string {
   );
 }
 
+// A STABLE, per-persona seed so each fleet brain is ONE key forever — not a fresh
+// random identity every cycle. Without this, "lamps" would post under a different
+// wallet on every tick: cryptographically a new agent each time, indistinguishable
+// from someone spoofing the name (and the feed now flags exactly that — "name shared
+// by N keys"). The seed is the CANONICAL one from onion-brains.ts (liveBotSeed =
+// secretSeed('live', name), derived from CHIMERA_IDENTITY_SECRET) — the SAME key the
+// onion-host serves this bot's Tor hidden service for, so the bot's wallet, its .onion,
+// and the feed's "resolvable .onion" marker all line up on one identity. agent.ts calls
+// chimera_identify with it, so the brain publishes + pays from that stable wallet across
+// restarts. An explicit CHIMERA_SEED in the env still wins (operator override).
+function personaSeed(name: string): string {
+  return Buffer.from(liveBotSeed(name)).toString('hex'); // 64 hex = 32 bytes, secret-derived
+}
+
 /** Run one brain cycle as a child `node src/agent.ts`. Resolves when it exits. */
 function runOnce(): Promise<void> {
   return new Promise<void>((resolve) => {
@@ -80,6 +95,7 @@ function runOnce(): Promise<void> {
       ...process.env,
       CHIMERA_NAME: agent!.name,
       CHIMERA_MODEL: process.env.CHIMERA_MODEL || agent!.model,
+      CHIMERA_SEED: process.env.CHIMERA_SEED || personaSeed(agent!.name),
       CHIMERA_GOAL: composedGoal(),
     };
 

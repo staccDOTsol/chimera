@@ -1,29 +1,43 @@
-// onion-brains.ts — the SINGLE source of truth for which brains run a real Tor hidden
-// service via onion-host.ts. Both the host (which actually serves the .onions) and the
-// clearnet feed (which labels those .onions "resolvable" and shows the live icon) import
-// this list, so the two can never drift: if a brain is here, the host serves it AND the
-// feed marks it live; if it isn't, the feed shows its derived address as a dead stub.
+// onion-brains.ts — SINGLE source of truth for which brains run a Tor hidden service,
+// and how their Ed25519 seeds are derived.
 //
-// To make a live Railway bot's .onion resolvable, its CHIMERA_SEED must equal
-// liveSeed(name) (hex) — same seed the host derives its hidden-service key from.
+// SECURITY (audit 2026-06-03): identities MUST derive from a SECRET, never from public
+// constants. The previous design used `new Uint8Array(32).fill(byte)` for seed brains and
+// `sha256("twitmolt-bot:"+name)` for live bots — both reproducible from this public repo,
+// which made every private signing key public (impersonation + signature forgery, and
+// fund control for any normal wallet funded at those addresses). Fixed here: a seed is
+// `sha256(CHIMERA_IDENTITY_SECRET : namespace : label)`. The byte/name LABELS stay (they
+// are just stable handles); the SECRET is what makes the result unguessable. Host, feed,
+// and bots all read the same secret from env so they agree WITHOUT the formula being
+// usable by anyone who only has the source.
 
 import { createHash } from 'node:crypto';
 import { identityFromSeed } from './identity.ts';
 
-export interface OnionBrain {
-  name: string;
-  byte?: number;
-  seed?: Uint8Array;
-  emoji?: string;
-  kind: 'seed' | 'live';
+// The shared secret. Set CHIMERA_IDENTITY_SECRET (high-entropy) in production secrets on
+// EVERY service (twitmolt feed, onion-host, each bot). Absent it, we fall back to a
+// clearly-insecure dev value and scream — local/demo only, NEVER prod.
+let _warned = false;
+function identitySecret(): string {
+  const s = process.env.CHIMERA_IDENTITY_SECRET;
+  if (s && s.length >= 16) return s;
+  if (!_warned) {
+    console.error('[SECURITY] CHIMERA_IDENTITY_SECRET unset/short — using INSECURE dev identities. Production MUST set a high-entropy secret; otherwise private keys are publicly derivable.');
+    _warned = true;
+  }
+  return 'twitmolt-INSECURE-dev-secret-set-CHIMERA_IDENTITY_SECRET-in-prod';
 }
 
-/** stable identity for a live Railway agent-bot — the seed its CHIMERA_SEED must match. */
-export function liveSeed(bot: string): Uint8Array {
-  return Uint8Array.from(createHash('sha256').update('twitmolt-bot:' + bot).digest());
+/** 32-byte Ed25519 seed for `namespace:label`, derived from the shared SECRET. Not
+ *  reproducible without the secret — that is the entire point of the rotation. */
+export function secretSeed(namespace: string, label: string | number): Uint8Array {
+  return Uint8Array.from(createHash('sha256').update(identitySecret() + ':twitmolt-identity:' + namespace + ':' + label).digest());
 }
 
-// deterministic seed brains — bytes MUST match src/seed.ts fixedIdentity().
+export interface OnionBrain { name: string; byte?: number; liveName?: string; emoji?: string; kind: 'seed' | 'live'; }
+
+// seed personas — keyed by their stable byte label (matches src/seed.ts fixedIdentity()).
+// The byte is public; the derived key is NOT (it goes through the secret).
 export const ONION_BRAINS: OnionBrain[] = [
   { name: 'Leo', byte: 1, emoji: '🦁', kind: 'seed' },
   { name: 'Serpens', byte: 2, emoji: '🐍', kind: 'seed' },
@@ -39,27 +53,24 @@ export const ONION_BRAINS: OnionBrain[] = [
   { name: 'eevee', byte: 133, emoji: '🦊', kind: 'seed' },
   { name: 'snorlax', byte: 143, emoji: '😴', kind: 'seed' },
 ];
-// live Railway agent-bots — hosted as live-<name>; resolvable once the bot runs the
-// matching CHIMERA_SEED = liveSeed(name).
+// live Railway agent-bots — keyed by bot name under the 'live' namespace. A bot derives
+// the SAME seed itself from CHIMERA_IDENTITY_SECRET + its name (see agent.ts).
 export const LIVE_BOTS = ['fomoxer', 'lamps', 'pumpmath', 'grafty', 'skillseeker'];
-for (const bot of LIVE_BOTS) ONION_BRAINS.push({ name: 'live-' + bot, seed: liveSeed(bot), emoji: '🤖', kind: 'live' });
+for (const bot of LIVE_BOTS) ONION_BRAINS.push({ name: 'live-' + bot, liveName: bot, emoji: '🤖', kind: 'live' });
 
-/** the 32-byte seed for a brain (filled byte for seed brains, hashed seed for live bots). */
+/** the secret-derived seed a brain signs with. */
 export function brainSeed(b: OnionBrain): Uint8Array {
-  return b.seed ?? new Uint8Array(32).fill(b.byte!);
+  return b.liveName !== undefined ? secretSeed('live', b.liveName) : secretSeed('seed', b.byte!);
+}
+/** the seed a live bot must run so its identity matches what onion-host serves. */
+export function liveBotSeed(botName: string): Uint8Array {
+  return secretSeed('live', botName);
 }
 
-export interface ResolvableOnion {
-  name: string;
-  onion: string;
-  solana: string;
-  emoji: string;
-  kind: 'seed' | 'live';
-}
-
+export interface ResolvableOnion { name: string; onion: string; solana: string; emoji: string; kind: 'seed' | 'live'; }
 let _cache: ResolvableOnion[] | null = null;
-/** Every brain the onion-host runs a hidden service for — the resolvable set. Derived
- *  once (deterministic) and cached. The feed uses this for /api/onions + the live icon. */
+/** the resolvable set (host serves a hidden service for each). Public keys + .onions only
+ *  — safe to expose; the secret never leaves the server. */
 export function resolvableOnions(): ResolvableOnion[] {
   if (_cache) return _cache;
   _cache = ONION_BRAINS.map((b) => {

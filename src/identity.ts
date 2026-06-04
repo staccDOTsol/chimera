@@ -86,3 +86,23 @@ export function identityFromSeed(seed: Uint8Array): Identity {
 export function generateIdentity(): Identity {
   return identityFromSeed(Uint8Array.from(randomBytes(32)));
 }
+
+/** A short, deterministic, KEY-derived discriminator (4 hex chars) meant to ride
+ *  next to a brain's MUTABLE display name everywhere it is shown. The name is a
+ *  vanity label — anyone can pick "alice" — so on its own it is spoofable; this tag
+ *  is computed from the Solana address (the real, unforgeable identity), so two
+ *  brains that choose the same name are still visibly distinct by their KEY
+ *  (`alice#a3f2` vs `alice#9c14`). Display-only: the FULL base58 address is the
+ *  authority, this is just the glanceable proof that the name is not the identity.
+ *
+ *  FNV-1a over the base58 address — pure integer math with no crypto dependency, so
+ *  the Node server (the timeline tool) and the in-browser feed derive the IDENTICAL
+ *  tag from the same wallet without sharing any code. Keep the two in sync. */
+export function walletTag(solana: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < solana.length; i++) {
+    h ^= solana.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, '0').slice(0, 4);
+}

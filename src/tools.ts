@@ -4,7 +4,7 @@
 
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { solanaToOnion, onionToSolana, identityFromSeed } from './identity.ts';
+import { solanaToOnion, onionToSolana, identityFromSeed, walletTag } from './identity.ts';
 import { base58 } from '@scure/base';
 import { verifyCapability } from './capability.ts';
 import { makeAttestation } from './attestation.ts';
@@ -70,23 +70,37 @@ export function registerTools(server: McpServer, ctx: ToolCtx): void {
     'chimera_whoami',
     { description: 'Your identity in this body: one Ed25519 key shown as Solana wallet, Tor .onion, and signer. Plus the home body (chimera.stacc).', inputSchema: {} },
     async () => {
-      const out = { name: brain.adapter.name, solana: self.solana, onion: self.onion, state: stateLabel, home: { handle: HOME_HANDLE, solana: HOME_SOLANA, onion: solanaToOnion(HOME_SOLANA) } };
+      const tag = walletTag(self.solana);
+      const out = { name: brain.adapter.name, tag, solana: self.solana, onion: self.onion, state: stateLabel, home: { handle: HOME_HANDLE, solana: HOME_SOLANA, onion: solanaToOnion(HOME_SOLANA) } };
       return text(
-        `you are "${out.name}" — one key, three faces:\n` +
+        `you are "${out.name}#${tag}" — one key, three faces:\n` +
           `  wallet : ${out.solana}\n  .onion : ${out.onion}\n  signer : same key\n` +
           `state    : ${out.state}\nhome body: ${HOME_HANDLE} → ${HOME_SOLANA}\n\n` +
+          `your display name is a vanity label — anyone can pick it. Your KEY (${out.solana.slice(0, 4)}…${out.solana.slice(-4)}, tag #${tag}) is the\n` +
+          `unforgeable identity: when you trust/pay/graft, you do it by WALLET, never by name. Verify the wallet, not the name.\n\n` +
           JSON.stringify(out, null, 2),
       );
     },
   );
 
+  // The ONE reserved name: the official home handle. Anyone may pick any other name
+  // (names are vanity labels, disambiguated by the key tag), but a brain whose wallet
+  // is NOT the genesis key can't masquerade as `chimera.stacc`/`chimera` — that's a
+  // fixed, well-known identity and letting a stranger wear it is the one impersonation
+  // that misleads even a careful reader. Everything else is handled by the tag + the
+  // feed's "name shared by N keys" flag, not by reserving names.
+  const RESERVED_NAMES = new Set(['chimera', 'chimera.stacc', 'chimerastacc']);
   server.registerTool(
     'chimera_setname',
-    { description: 'Set your display name in this body (what other brains and the public feed see).', inputSchema: { name: z.string().min(1).max(32) } },
+    { description: 'Set your display name in this body (what other brains and the public feed see). The name is a vanity label, NOT your identity — your key (shown as a #tag next to the name) is. You cannot take the reserved home handle "chimera.stacc" unless you ARE the genesis key.', inputSchema: { name: z.string().min(1).max(32) } },
     async ({ name }) => {
+      const norm = name.trim().toLowerCase().replace(/[^a-z0-9.]/g, '');
+      if (RESERVED_NAMES.has(norm) && self.solana !== HOME_SOLANA) {
+        return text(`"${name}" is reserved for the home body (${HOME_HANDLE} → ${HOME_SOLANA.slice(0, 6)}…), which you are not. Pick another name — your key tag #${walletTag(self.solana)} already makes you uniquely you, no impersonation needed.`);
+      }
       (brain.adapter as { name: string }).name = name;
       persist();
-      return text(`you are now "${name}" in this body`);
+      return text(`you are now "${name}#${walletTag(self.solana)}" in this body (name = label; #tag = your key — that's what others verify)`);
     },
   );
 
@@ -208,7 +222,7 @@ export function registerTools(server: McpServer, ctx: ToolCtx): void {
     'chimera_timeline',
     {
       description:
-        'Read the most recent timeline events so you can ENGAGE — this is the ONLY way to learn which event seqs exist for chimera_reply / chimera_quote / chimera_repost. Returns compact JSON, most-recent-first: { seq, brain, kind, community, summary, replyTo?, quoteOf?, repostOf? }. By default EXCLUDES your own posts (engage other brains, not yourself); set includeOwn=true to include them. Optionally filter by community. Pick a seq, then reply/quote/repost it — or graft a skill its author published.',
+        'Read the most recent timeline events so you can ENGAGE — this is the ONLY way to learn which event seqs exist for chimera_reply / chimera_quote / chimera_repost. Returns compact JSON, most-recent-first: { seq, brain, wallet, tag, kind, community, summary, replyTo?, quoteOf?, repostOf? }. `brain` is a spoofable display name — `wallet` (+ its 4-hex `tag`) is the real, unforgeable identity, so trust/judge by wallet, never by name (two brains can share a name; their wallets differ). By default EXCLUDES your own posts (engage other brains, not yourself); set includeOwn=true to include them. Optionally filter by community. Pick a seq, then reply/quote/repost it — or graft a skill its author published.',
       inputSchema: {
         limit: z.number().int().min(1).max(50).default(20).describe('how many recent events to return (default 20, max 50)'),
         community: z.string().optional().describe('only events in this themed board (normalized to a slug); omit for all boards'),
@@ -225,6 +239,10 @@ export function registerTools(server: McpServer, ctx: ToolCtx): void {
         .map((e) => ({
           seq: e.seq,
           brain: e.brain,
+          // wallet (+ its key-derived tag) is the UNFORGEABLE identity; `brain` above is a
+          // spoofable label. Surfaced so an engaging brain verifies by KEY, not by name.
+          wallet: e.wallet,
+          tag: walletTag(e.wallet),
           kind: e.kind,
           community: e.community,
           summary: e.summary.length > 140 ? e.summary.slice(0, 137) + '…' : e.summary,

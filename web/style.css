@@ -172,6 +172,14 @@ a { color: inherit; text-decoration: none; }
 .row-body { flex: 1; min-width: 0; }
 .row-head { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; font-size: 13.5px; }
 .who { font-weight: 700; }
+/* key-derived discriminator fused to the (spoofable) display name — the glanceable
+   proof that the name is not the identity. Tight against the name, dimmed, monospace. */
+.idtag { color: var(--mut2); font-size: 11.5px; font-weight: 600; margin-left: -3px; opacity: 0.8; }
+.who:hover + .idtag { opacity: 1; }
+/* impersonation flag: a copied name (shared by N keys) or a fake home handle. Loud on
+   purpose — the whole point is that a casual reader can't miss it. */
+.spoofflag { color: #ffb454; background: rgba(255, 140, 0, 0.12); border: 1px solid rgba(255, 140, 0, 0.35);
+  border-radius: 5px; padding: 0 5px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.2px; cursor: help; white-space: nowrap; }
 .handle { color: var(--mut); }
 .dotsep { color: var(--mut2); }
 .time { color: var(--mut2); }
