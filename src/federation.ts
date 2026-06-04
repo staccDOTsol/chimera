@@ -21,6 +21,36 @@
 
 import { verifyCapability } from './capability.ts';
 import type { SignedCapability } from './capability.ts';
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
+
+// ── SSRF guard (audit 2026-06-03) ─────────────────────────────────────────────
+// chimera_connect → fetchRemoteCaps is reachable by ANY MCP brain (the body is open),
+// so a caller-controlled target could point the server at internal services or the cloud
+// metadata endpoint (169.254.169.254). Resolve the host and refuse private/loopback/
+// link-local/metadata addresses before fetching. (Residual: DNS-rebinding TOCTOU — a
+// pinned-IP fetch would close it fully; this blocks the direct cases.)
+function isBlockedIp(ip: string): boolean {
+  const v = ip.toLowerCase();
+  if (/^127\./.test(ip) || ip === '0.0.0.0') return true;
+  if (/^10\./.test(ip)) return true;
+  if (/^192\.168\./.test(ip)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(ip)) return true;
+  if (/^169\.254\./.test(ip)) return true;
+  if (v === '::1' || v === '::' || v.startsWith('fe80') || v.startsWith('fc') || v.startsWith('fd')) return true;
+  return false;
+}
+async function assertPublicHost(origin: string): Promise<string | null> {
+  let host: string;
+  try { host = new URL(origin).hostname; } catch { return 'invalid origin'; }
+  let ips: string[];
+  if (isIP(host)) ips = [host];
+  else {
+    try { ips = (await lookup(host, { all: true })).map((r) => r.address); } catch (e) { return `cannot resolve host '${host}': ${(e as Error).message}`; }
+  }
+  for (const ip of ips) if (isBlockedIp(ip)) return `refusing SSRF target — '${host}' resolves to a private/loopback/metadata address (${ip})`;
+  return null;
+}
 
 export interface RemoteCapsResult {
   /** the resolved origin we fetched (or attempted) — e.g. http://host:port. */
@@ -96,6 +126,8 @@ export async function fetchRemoteCaps(target: string): Promise<RemoteCapsResult>
     } catch (e) {
       return { url: raw, caps: [], error: `invalid URL: ${(e as Error).message}` };
     }
+    const blocked = await assertPublicHost(origin);
+    if (blocked) return { url: `${origin}/api/caps`, caps: [], error: blocked };
   } else if (raw.toLowerCase().endsWith('.onion')) {
     // ── Tor v3 hidden service: http://<onion>/api/caps, via TOR_SOCKS. ──────
     origin = 'http://' + raw.toLowerCase();
@@ -138,12 +170,16 @@ export async function fetchRemoteCaps(target: string): Promise<RemoteCapsResult>
   // ── pull + verify ─────────────────────────────────────────────────────────
   let res: Response;
   try {
-    res = await fetch(url, { ...fetchOpts, headers: { accept: 'application/json' } });
+    res = await fetch(url, { ...fetchOpts, headers: { accept: 'application/json' }, signal: AbortSignal.timeout(8000) });
   } catch (e) {
     return { url, caps: [], error: `fetch failed: ${(e as Error).message}` };
   }
   if (!res.ok) {
     return { url, caps: [], error: `remote returned HTTP ${res.status} ${res.statusText}` };
+  }
+  // size cap: don't ingest an unbounded remote payload.
+  if (Number(res.headers.get('content-length') || 0) > 2_000_000) {
+    return { url, caps: [], error: 'remote /api/caps exceeds 2MB cap' };
   }
 
   let payload: unknown;

@@ -103,7 +103,10 @@ export function fomox402ConfigFromEnv(env: NodeJS.ProcessEnv = process.env): Fom
   return {
     apiKey,
     baseUrl: baseUrl || DEFAULT_BASE_URL,
-    dryRun: envFlag(env.FOMOX402_DRY_RUN),
+    // SECURITY (audit 2026-06-03): dry-run by DEFAULT so real funds never move by accident
+    // (an open /mcp could otherwise trigger live settlement). Real spend now requires an
+    // EXPLICIT opt-in: FOMOX402_LIVE=1. (FOMOX402_DRY_RUN=0 alone no longer enables live.)
+    dryRun: !(env.FOMOX402_LIVE === '1' || env.FOMOX402_LIVE === 'true'),
     requestKind: (env.FOMOX402_REQUEST_KIND ?? '').trim() || DEFAULT_REQUEST_KIND,
     timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : DEFAULT_TIMEOUT_MS,
   };
