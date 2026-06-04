@@ -55,6 +55,14 @@ export function normalize(o: unknown): Bounty | null {
   return { id, url, title, description, author, reward, createdAt, raw: o };
 }
 
+/** Recursively find every bounty-shaped object inside a blob (for __NEXT_DATA__ / JSON
+ *  response walking). Exported so the browser adapter can reuse it on intercepted bodies. */
+export function harvestBounties(blob: unknown): Bounty[] {
+  const out: Bounty[] = [];
+  harvest(blob, out);
+  return out;
+}
+
 /** Recursively find every bounty-shaped object inside a blob (for __NEXT_DATA__ walking). */
 function harvest(node: unknown, out: Bounty[], seen = new Set<string>(), depth = 0): void {
   if (depth > 8 || node == null || typeof node !== 'object') return;

@@ -1,0 +1,25 @@
+# Dockerfile.bounties — 24/7 worker that indexes go.pump.fun bounties and ranks them by
+# harm severity (see src/bounties/). Ships Chromium so the headless-browser source can
+# clear Cloudflare's JS challenge — header-spoofed HTTP fetches cannot.
+#
+# Node 24 (native .ts stripping, matches the repo). Playwright is installed in the image
+# rather than the pnpm lockfile (it's an optional runtime dep, dynamically imported).
+FROM node:24-bookworm-slim
+WORKDIR /app
+RUN corepack enable
+
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --prod --frozen-lockfile
+# Chromium + its system libraries, plus the playwright driver itself.
+RUN pnpm add playwright@1.49.0 && npx playwright install --with-deps chromium
+
+COPY src ./src
+
+# Worker defaults — override in fly.bounties.toml / Railway env as needed.
+ENV BOUNTIES_BROWSER=1
+ENV BOUNTIES_OUT_DIR=/data/bounties
+ENV BOUNTIES_INTERVAL_SEC=120
+# Evidence store persists on the mounted volume at /data.
+VOLUME ["/data"]
+
+CMD ["node", "src/bounties/reindex.ts", "--loop"]

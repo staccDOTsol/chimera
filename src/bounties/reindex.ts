@@ -15,13 +15,27 @@ import { fetchAllBounties } from './source.ts';
 import { rankBounties } from './score.ts';
 import { renderMarkdown } from './report.ts';
 import { BountyStore } from './store.ts';
+import type { Bounty } from './types.ts';
 
 const OUT_DIR = process.env.BOUNTIES_OUT_DIR || './data/bounties';
 const INTERVAL = Number(process.env.BOUNTIES_INTERVAL_SEC || 120) * 1000;
+const USE_BROWSER = process.env.BOUNTIES_BROWSER === '1';
 
-async function pass(store: BountyStore): Promise<void> {
+/** A source of bounties for one pass — either the HTTP fetcher or a persistent browser. */
+type Source = { fetch: () => Promise<Bounty[]>; close: () => Promise<void> };
+
+async function makeSource(): Promise<Source> {
+  if (!USE_BROWSER) return { fetch: fetchAllBounties, close: async () => {} };
+  const { BrowserBountySource } = await import('./browser-source.ts');
+  const b = new BrowserBountySource();
+  await b.init();
+  console.log('[reindex] using headless-browser source (Cloudflare-clearing)');
+  return { fetch: () => b.fetch(), close: () => b.close() };
+}
+
+async function pass(store: BountyStore, source: Source): Promise<void> {
   const fetchedAt = new Date().toISOString();
-  const fresh = await fetchAllBounties();
+  const fresh = await source.fetch();
   const delta = store.upsert(fresh);
   await store.save();
 
@@ -47,15 +61,20 @@ async function pass(store: BountyStore): Promise<void> {
 async function main(): Promise<void> {
   const store = new BountyStore(join(OUT_DIR, 'index.json'));
   await store.load();
+  const source = await makeSource();
 
   const loop = process.argv.includes('--loop');
-  await pass(store);
-  if (!loop) return;
+  const shutdown = async () => { await source.close(); process.exit(0); };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
+
+  await pass(store, source);
+  if (!loop) { await source.close(); return; }
 
   console.log(`[reindex] looping every ${INTERVAL / 1000}s — Ctrl-C to stop`);
   for (;;) {
     await new Promise((r) => setTimeout(r, INTERVAL));
-    try { await pass(store); } catch (e) { console.error(`[reindex] pass failed: ${(e as Error).message}`); }
+    try { await pass(store, source); } catch (e) { console.error(`[reindex] pass failed: ${(e as Error).message}`); }
   }
 }
 

@@ -1,0 +1,31 @@
+# fly.bounties.toml — deploy the bounty abuse-monitor as a standalone 24/7 worker.
+#
+#   fly launch --config fly.bounties.toml --dockerfile Dockerfile.bounties --no-deploy
+#   fly volumes create bounties_data --size 3 --region iad
+#   fly deploy --config fly.bounties.toml
+#
+# No http_service: this is a background worker, not a server. The machine stays up and
+# runs the reindex loop; the evidence store lives on the bounties_data volume so captured
+# bounties (incl. ones pump.fun later deletes) survive restarts and redeploys.
+app = "twitmolt-bounties"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile.bounties"
+
+[env]
+  BOUNTIES_BROWSER = "1"
+  BOUNTIES_OUT_DIR = "/data/bounties"
+  BOUNTIES_INTERVAL_SEC = "120"
+  BOUNTIES_PAGE_URL = "https://pump.fun/go"
+  # If Cloudflare/login needs a real session, set these as Fly secrets instead of env:
+  #   fly secrets set --config fly.bounties.toml BOUNTIES_COOKIE='cf_clearance=...; ...'
+
+[mounts]
+  source = "bounties_data"
+  destination = "/data"
+
+# Chromium is memory-hungry; give it room. One machine — this is a single indexer.
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "2048mb"

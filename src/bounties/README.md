@@ -25,6 +25,32 @@ node src/bounties/reindex.ts --once --json
 
 > Requires Node ≥ 23.6 (native TS). On Node 22 use `node --experimental-strip-types …`.
 
+## Durable 24/7 capture (recommended — "index before they delete it")
+
+pump.fun/go is behind **Cloudflare's JS challenge**, so header-spoofed HTTP fetches get
+blocked. The robust path drives a **real headless Chromium** that clears the challenge,
+keeps a **persistent browser context** alive across passes (so the `cf_clearance` cookie
+survives), and harvests bounties from both intercepted XHR and `__NEXT_DATA__`.
+
+```bash
+# local
+pnpm add -D playwright && npx playwright install chromium
+BOUNTIES_BROWSER=1 pnpm bounties:loop
+
+# deploy as a standalone worker (ships Chromium, runs the loop forever, persists evidence)
+fly launch --config fly.bounties.toml --dockerfile Dockerfile.bounties --no-deploy
+fly volumes create bounties_data --size 3 --region iad
+fly deploy --config fly.bounties.toml
+```
+
+If Cloudflare or a login still challenges the worker, copy a logged-in session from your
+browser (DevTools → any pump.fun request → Copy as cURL) and set it as a secret:
+`fly secrets set --config fly.bounties.toml BOUNTIES_COOKIE='cf_clearance=…; …'`.
+
+Browser-source env: `BOUNTIES_BROWSER=1` (enable), `BOUNTIES_PAGE_URL`,
+`BOUNTIES_BROWSER_PROFILE` (persistent profile dir), `BOUNTIES_NAV_TIMEOUT_MS`,
+`BOUNTIES_SETTLE_MS`, `BOUNTIES_HEADFUL=1` (debug with a visible window).
+
 ## Configuring the source (important)
 
 The bounty endpoints sit behind Cloudflare, so the live JSON schema isn't pinned. The
