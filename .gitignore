@@ -5,3 +5,6 @@ dist/
 .env.*
 .DS_Store
 .vercel
+
+# scraped bounty evidence / generated reports — keep out of git by default
+data/bounties/

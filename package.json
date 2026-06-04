@@ -16,7 +16,9 @@
     "onion-publish": "node src/onion-publish.ts",
     "fleet": "node src/fleet/run-agent.ts",
     "fleet:lamps": "FLEET_AGENT=lamps node src/fleet/run-agent.ts",
-    "fleet:pumpmath": "FLEET_AGENT=pumpmath node src/fleet/run-agent.ts"
+    "fleet:pumpmath": "FLEET_AGENT=pumpmath node src/fleet/run-agent.ts",
+    "bounties": "node src/bounties/reindex.ts",
+    "bounties:loop": "node src/bounties/reindex.ts --loop"
   },
   "bin": {
     "chimera-mcp": "src/mcp.ts"
