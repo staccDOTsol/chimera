@@ -163,14 +163,17 @@ export class OnchainBountySource {
     await writeFile(this.cachePath, JSON.stringify(Object.fromEntries(this.cache), null, 2));
   }
 
+  private resolving = false;
+
+  /** Enumerate ALL bounties instantly from account data (reward/creator/escrow — no per-tx
+   *  RPC), merging any cached metadata/text. Text/link/timestamp resolution (slow, rate-
+   *  limited, Cloudflare-gated) runs in the BACKGROUND so it never blocks the index/site. */
   async fetch(): Promise<Bounty[]> {
     await this.loadCache();
     const accounts = await rpc<{ pubkey: string; account: { data: [string, string]; lamports: number } }[]>(
       'getProgramAccounts', [PROGRAM, { encoding: 'base64', filters: [{ dataSize: ACCOUNT_SIZE }] }]);
 
-    const out: Bounty[] = [];
-    let resolvedThisPass = 0;
-    for (const a of accounts) {
+    const out = accounts.map((a) => {
       const pubkey = a.pubkey;
       const raw = base58Bytes(a.account.data[0]);
       const creator = raw ? pk(raw, 8) : undefined;
@@ -179,17 +182,8 @@ export class OnchainBountySource {
       const rewardSol = raw && raw.length >= 113
         ? Number(new DataView(raw.buffer, raw.byteOffset, raw.byteLength).getBigUint64(105, true)) / LAMPORTS
         : 0;
-
-      // resolve text once per bounty, capped per pass to respect RPC limits
-      let r = this.cache.get(pubkey);
-      if (!r && resolvedThisPass < RESOLVE_MAX) {
-        r = await resolveText(pubkey).catch(() => ({} as Resolved));
-        this.cache.set(pubkey, r);
-        resolvedThisPass++;
-      }
-      r = r ?? {};
-
-      out.push({
+      const r = this.cache.get(pubkey) ?? {};
+      return {
         id: pubkey,
         url: r.metadataUrl ?? `https://pump.fun/go/${pubkey}`,
         title: r.title,
@@ -198,10 +192,29 @@ export class OnchainBountySource {
         reward: rewardSol > 0 ? `${rewardSol} SOL` : (r.reward ?? '—'),
         createdAt: r.createdAt,
         raw: { lamports: a.account.lamports, program: PROGRAM, uuid: r.uuid, account: pubkey, rewardSol },
-      });
-    }
-    if (resolvedThisPass) await this.saveCache();
+      } satisfies Bounty;
+    });
+
+    // backfill metadata/text for not-yet-resolved bounties, off the hot path
+    void this.resolveBacklog(accounts.map((a) => a.pubkey).filter((pk) => !this.cache.has(pk)));
     return out;
+  }
+
+  /** Resolve up to RESOLVE_MAX un-cached bounties per cycle, in the background. Non-reentrant
+   *  so passes don't stack work. Results land in the cache and surface on the next pass. */
+  private async resolveBacklog(pending: string[]): Promise<void> {
+    if (this.resolving || pending.length === 0) return;
+    this.resolving = true;
+    try {
+      for (const pubkey of pending.slice(0, RESOLVE_MAX)) {
+        const r = await resolveText(pubkey).catch(() => ({} as Resolved));
+        this.cache.set(pubkey, r);
+      }
+      await this.saveCache().catch(() => {});
+      console.log(`[onchain] resolved ${Math.min(pending.length, RESOLVE_MAX)} bounty metadata (${pending.length} pending)`);
+    } finally {
+      this.resolving = false;
+    }
   }
 
   async close(): Promise<void> { await this.saveCache().catch(() => {}); }
