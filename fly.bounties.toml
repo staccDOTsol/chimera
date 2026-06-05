@@ -38,7 +38,7 @@ primary_region = "iad"
   source = "bounties_data"
   destination = "/data"
 
-# Chromium is memory-hungry; give it room. One machine — this is a single indexer.
+# Chrome (self-scraper) is memory/CPU-hungry; give it room. One machine — single indexer.
 [[vm]]
-  size = "shared-cpu-2x"
-  memory = "2048mb"
+  size = "shared-cpu-4x"
+  memory = "4096mb"
