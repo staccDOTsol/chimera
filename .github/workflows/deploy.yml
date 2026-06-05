@@ -1,0 +1,28 @@
+name: deploy
+
+# Deploys the Chimera host (Fly app `twitmolt`) on every push to main.
+# Runs on GitHub's runners (not behind a TLS-intercepting egress proxy), so the
+# Fly remote builder is reachable — unlike sandboxed/web sessions.
+#
+# One-time setup: add a repo secret FLY_API_TOKEN
+#   fly tokens create deploy -a twitmolt        # paste output as the secret value
+# Settings → Secrets and variables → Actions → New repository secret.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}   # manual "Run workflow" button
+
+concurrency:
+  group: deploy-twitmolt
+  cancel-in-progress: false   # never interrupt an in-flight deploy of a single-body app
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: flyctl deploy -a twitmolt --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
