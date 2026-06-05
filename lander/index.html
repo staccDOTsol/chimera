@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>The Carry Trade · stacsol LST</title>
+<style>
+  :root{
+    --bg:#0a0b0f; --panel:#12141c; --ink:#eef1f7; --mute:#8a93a6;
+    --red:#ff4d5e; --red2:#7a1b25; --grn:#27e0a0; --grn2:#0d5e44;
+    --sol:#9945ff; --line:#222634; --amber:#ffb347;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  }
+  *{box-sizing:border-box} html,body{margin:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);
+    line-height:1.35;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:980px;margin:0 auto;padding:28px 20px 64px}
+  .eyebrow{font:600 12px/1 var(--mono);letter-spacing:.22em;text-transform:uppercase;color:var(--mute)}
+  h1{font-size:clamp(32px,6vw,58px);line-height:1.02;margin:10px 0 6px;letter-spacing:-.02em}
+  h1 .grn{color:var(--grn)} h1 .red{color:var(--red)}
+  .sub{color:var(--mute);font-size:15px;max-width:560px}
+  section{margin-top:34px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px}
+  .label{font:600 11px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--mute);margin-bottom:14px}
+
+  /* SPREAD chart */
+  .spread{display:grid;grid-template-columns:1fr;gap:14px}
+  @media(min-width:760px){.spread{grid-template-columns:1fr 96px 1fr;align-items:center}}
+  .bar{display:flex;align-items:center;gap:10px;margin:10px 0}
+  .bar .name{flex:0 0 132px;font-size:13px;color:var(--mute)}
+  .bar .track{flex:1;height:30px;background:#0e1017;border-radius:7px;overflow:hidden;position:relative}
+  .bar .fill{height:100%;border-radius:7px;display:flex;align-items:center;justify-content:flex-end;
+    padding-right:9px;font:700 14px/1 var(--mono);color:#0a0b0f}
+  .fill.red{background:linear-gradient(90deg,#ff6b78,#ff4d5e)}
+  .fill.grn{background:linear-gradient(90deg,#27e0a0,#15b585)}
+  .arrowbox{text-align:center}
+  .arrowbox .car{font:800 13px/1.1 var(--mono);color:var(--grn);letter-spacing:.04em}
+  .arrowbox .ar{font-size:40px;color:var(--grn);line-height:1}
+  @media(max-width:759px){.arrowbox .ar{transform:rotate(90deg);display:inline-block}}
+  .colhead{font:700 13px/1 var(--mono);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px}
+  .colhead.red{color:var(--red)} .colhead.grn{color:var(--grn)}
+  .colhead small{display:block;color:var(--mute);font-weight:500;letter-spacing:0;text-transform:none;margin-top:3px}
+
+  /* HOW steps */
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;text-align:center}
+  @media(max-width:620px){.steps{grid-template-columns:1fr}}
+  .step .n{font:800 22px/1 var(--mono);color:var(--sol)}
+  .step .t{font-weight:700;margin:8px 0 2px}
+  .step .d{font-size:12.5px;color:var(--mute)}
+
+  /* PROOF */
+  .proof{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:620px){.proof{grid-template-columns:1fr}}
+  .stat{background:#0e1017;border:1px solid var(--line);border-radius:12px;padding:16px}
+  .stat .big{font:800 34px/1 var(--mono);letter-spacing:-.01em}
+  .stat .big.red{color:var(--red)} .stat .big.grn{color:var(--grn)}
+  .stat .cap{font-size:12.5px;color:var(--mute);margin-top:6px}
+
+  /* TRUTH */
+  .truth{border-color:var(--red2);background:linear-gradient(180deg,#1a1015,#12141c)}
+  .truth .label{color:var(--red)}
+  .risks{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:620px){.risks{grid-template-columns:1fr}}
+  .risk .rh{font-weight:700;color:var(--amber);font-size:13.5px;margin-bottom:3px}
+  .risk .rb{font-size:12.5px;color:#cdd3df}
+  .kill{margin-top:16px;border-top:1px dashed var(--red2);padding-top:14px;font-size:13px;color:#ffd0d4}
+  .kill b{color:#fff}
+
+  .foot{margin-top:30px;font-size:11.5px;color:var(--mute);line-height:1.6}
+  .foot a{color:var(--grn);text-decoration:none}
+  .tag{display:inline-block;font:600 10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;
+    color:var(--mute);border:1px solid var(--line);border-radius:999px;padding:5px 9px;margin-right:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">The carry trade · honest edition</div>
+    <h1>Borrow <span class="red">expensive.</span><br>Earn <span class="grn">more.</span>*</h1>
+    <p class="sub">The <b>APR you pay</b> to borrow vs. the <b>APY this LST earned</b>.
+      When the rate you earn beats the rate you owe, the gap is yours. <br>
+      <b>*Historically. Past performance is not a promise — read “How this wrecks you.”</b></p>
+  </header>
+
+  <!-- THE SPREAD -->
+  <section class="card">
+    <div class="label">The spread · annualized APR, like-for-like</div>
+    <div class="spread">
+      <div>
+        <div class="colhead red">What it costs to borrow <small>cost of capital, US typical APR</small></div>
+        <div class="bar"><div class="name">Credit card</div><div class="track"><div class="fill red" style="width:8%">22%</div></div></div>
+        <div class="bar"><div class="name">Bad-credit loan</div><div class="track"><div class="fill red" style="width:12%">36%</div></div></div>
+        <div class="bar"><div class="name">Payday loan</div><div class="track"><div class="fill red" style="width:100%">391%</div></div></div>
+      </div>
+      <div class="arrowbox">
+        <div class="car">CARRY</div>
+        <div class="ar">→</div>
+      </div>
+      <div>
+        <div class="colhead grn">What this LST earned <small>last 18 days, annualized (simple)</small></div>
+        <div class="bar"><div class="name">stacsol LST</div><div class="track"><div class="fill grn" style="width:91%">≈357%</div></div></div>
+        <div style="font-size:12.5px;color:var(--mute);margin-top:6px;line-height:1.5">
+          Realized: <b style="color:var(--grn)">+17.6% in SOL over ~18 days</b>.
+          Crushes cards &amp; bad-credit loans. <b style="color:var(--amber)">Neck-and-neck with payday</b> on a
+          like-for-like basis — that’s the razor’s edge, not a free lunch.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW -->
+  <section class="card">
+    <div class="label">The trade, in three moves</div>
+    <div class="steps">
+      <div class="step"><div class="n">1</div><div class="t">Borrow</div><div class="d">Draw on the cheapest credit you can get. Cheaper = wider carry.</div></div>
+      <div class="step"><div class="n">2</div><div class="t">Stake</div><div class="d">Deposit into the Sanctum LST. You hold a token, not a promise.</div></div>
+      <div class="step"><div class="n">3</div><div class="t">Accrue</div><div class="d">Redemption rate climbs each epoch — your token redeems for more SOL.</div></div>
+    </div>
+  </section>
+
+  <!-- PROOF -->
+  <section>
+    <div class="label" style="padding-left:4px">The proof it’s done its job: it beat SOL, in SOL, while SOL fell</div>
+    <div class="proof">
+      <div class="stat"><div class="big red">−23.6%</div><div class="cap">SOL / USD, same 18-day window. The market bled.</div></div>
+      <div class="stat"><div class="big grn">+17.6%</div><div class="cap">LST redemption rate, in SOL. You ended with <b>more SOL</b> than a holder.</div></div>
+      <div class="stat"><div class="big grn">1.00 → 2.17</div><div class="cap">SOL per token since the 1:1 launch. The token only knows one direction: up, in SOL.</div></div>
+      <div class="stat"><div class="big grn">+69.6%</div><div class="cap">USD value of a launch deposit today — <b>despite</b> SOL down ~22%. <span style="color:var(--mute)">(since-launch est.)</span></div></div>
+    </div>
+  </section>
+
+  <!-- THE TRUTH -->
+  <section class="card truth">
+    <div class="label">How this wrecks you · read before you borrow a cent</div>
+    <div class="risks">
+      <div class="risk"><div class="rh">SOL can fall faster than you earn</div><div class="rb">Your loan is owed in dollars; your yield is in SOL. If SOL drops >54% you’re underwater even at today’s rate — and you still owe the loan.</div></div>
+      <div class="risk"><div class="rh">The yield is shrinking</div><div class="rb">Per-epoch accrual has compressed ~70× since launch. It’s maturing toward normal staking (~7%). Yesterday’s carry is not tomorrow’s.</div></div>
+      <div class="risk"><div class="rh">Payday loans compound in weeks</div><div class="rb">Rewards land per epoch (~2.5 days) and can stall. A short, fast-compounding loan against a slow, variable yield is a timing trap.</div></div>
+      <div class="risk"><div class="rh">It’s leverage on a volatile asset</div><div class="rb">Borrowing at a predatory APR to chase crypto yield is one of the riskiest things you can do with money. Liquidation and total loss are real.</div></div>
+    </div>
+    <div class="kill">
+      <b>The honest bottom line:</b> the carry has been real against credit cards and bad-credit
+      loans, and a coin-flip against payday. But <b>you can lose your principal AND still owe the loan.</b>
+      Never borrow money you can’t afford to lose. This is not financial advice, and nothing here
+      promises future returns.
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer class="foot">
+    <span class="tag">Verify, don’t trust</span>
+    <span class="tag">Data 2026-06-05</span>
+    <span class="tag">Not financial advice</span>
+    <br><br>
+    Every number above is reproducible from the live endpoint
+    <a href="https://stacsol.app/api/history">stacsol.app/api/history</a>
+    (redemption <code>rate</code> per Solana epoch) and CoinGecko SOL/USD daily closes.
+    Window: 5,000 samples, ~18 days, epochs 973–982. Annualized figures are projections of a
+    short, variable, maturing yield and will change. The 1:1-launch and +69.6%-USD figures
+    predate the endpoint’s retained window and rest on the stated 1:1 launch anchor.
+    Methodology &amp; caveats: <a href="./METHODOLOGY.md">METHODOLOGY.md</a>.
+  </footer>
+
+</div>
+</body>
+</html>
