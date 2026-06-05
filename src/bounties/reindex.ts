@@ -67,14 +67,18 @@ async function pass(store: BountyStore, source: Source): Promise<void> {
 
   // Feed the live dashboard: snapshot for new clients + per-event stream.
   const solPriceUsd = await getSolPriceUsd();
-  const rewardSol = ranked.reduce((s, r) => s + Number((r.bounty.raw as any)?.rewardSol || 0), 0);
-  const rewardUsd = rewardSol * solPriceUsd;
+  // each bounty rewards in its own token; raw.rewardUsd is already priced per-mint. Count
+  // only priced bounties (unresolved/illiquid mints contribute 0 until they backfill).
+  const rewardUsd = ranked.reduce((s, r) => s + Number((r.bounty.raw as any)?.rewardUsd || 0), 0);
+  const pricedCount = ranked.filter((r) => Number((r.bounty.raw as any)?.rewardUsd) > 0).length;
+  const rewardSol = solPriceUsd > 0 ? rewardUsd / solPriceUsd : 0;
   const categories = flagged.reduce<Record<string, number>>((a, r) => {
     for (const c of new Set(r.hits.map((h) => h.category))) a[c] = (a[c] ?? 0) + 1; return a;
   }, {});
   const newest = ranked.map((r) => r.bounty.createdAt).filter(Boolean).sort().at(-1);
   const stats = { fetchedAt, total: ranked.length, flagged: flagged.length,
     rewardSol: Number(rewardSol.toFixed(3)), rewardUsd: Number(rewardUsd.toFixed(2)), solPriceUsd, newest,
+    pricedCount,
     counts: flagged.reduce<Record<string, number>>((a, r) => ((a[r.tier] = (a[r.tier] ?? 0) + 1), a), {}),
     categories };
   bus.setSnapshot(flagged, stats);
@@ -83,7 +87,7 @@ async function pass(store: BountyStore, source: Source): Promise<void> {
   }
   bus.emit({ type: 'pass', ts: fetchedAt, fetched: fresh.length, added: delta.added,
     updated: delta.updated, gone: delta.gone, flagged: flagged.length, total: ranked.length,
-    rewardSol: stats.rewardSol, rewardUsd: stats.rewardUsd, solPriceUsd, counts: stats.counts, categories, newest,
+    rewardSol: stats.rewardSol, rewardUsd: stats.rewardUsd, solPriceUsd, pricedCount, counts: stats.counts, categories, newest,
     top: worst ? { score: worst.score, tier: worst.tier, rationale: worst.rationale } : null });
 
   console.log(

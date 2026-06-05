@@ -167,7 +167,7 @@ function summarize(s){if(!s)return;
   if(s.solPriceUsd)SOLP=s.solPriceUsd;
   if(s.total!=null){sTotal.textContent=s.total;cTotal.textContent=s.total;}
   if(s.rewardUsd!=null)sUsd.textContent=usd(s.rewardUsd);
-  if(s.rewardSol!=null)sSol.textContent=Number(s.rewardSol).toLocaleString(undefined,{maximumFractionDigits:1})+' SOL';
+  if(s.rewardSol!=null)sSol.textContent='≈ '+Number(s.rewardSol).toLocaleString(undefined,{maximumFractionDigits:0})+' SOL'+(s.pricedCount!=null?' · '+s.pricedCount+' priced':'');
   if(SOLP)sPrice.textContent='SOL ≈ $'+SOLP.toLocaleString(undefined,{maximumFractionDigits:2});
   if(s.flagged!=null)sFlagged.textContent=s.flagged;
   if(s.newest)sNewest.textContent=new Date(s.newest).toLocaleDateString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});

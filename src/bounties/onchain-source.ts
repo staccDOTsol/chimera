@@ -17,7 +17,12 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { base58 } from '@scure/base';
+import { getTokenPrices } from './price.ts';
 import type { Bounty } from './types.ts';
+
+const WSOL = 'So11111111111111111111111111111111111111112';
+const formatAmt = (n: number): string =>
+  n >= 1_000_000 ? (n / 1_000_000).toFixed(2) + 'M' : n >= 1000 ? (n / 1000).toFixed(1) + 'K' : n.toLocaleString(undefined, { maximumFractionDigits: 4 });
 
 const RPC = process.env.BOUNTIES_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const PROGRAM = process.env.BOUNTIES_PROGRAM || 'goGzNYTYkSEe4hUqz6dPmY5uf3CTt36AQAoujXDrKiV';
@@ -26,7 +31,7 @@ const OUT_DIR = process.env.BOUNTIES_OUT_DIR || './data/bounties';
 const RESOLVE_MAX = Number(process.env.BOUNTIES_RESOLVE_MAX || 60);
 const LAMPORTS = 1_000_000_000;
 
-interface Resolved { title?: string; description?: string; author?: string; reward?: string; createdAt?: string; metadataUrl?: string; uuid?: string }
+interface Resolved { title?: string; description?: string; author?: string; reward?: string; createdAt?: string; metadataUrl?: string; uuid?: string; rewardMint?: string; rewardDecimals?: number }
 
 async function rpc<T>(method: string, params: unknown[], tries = 4): Promise<T> {
   for (let i = 0; i < tries; i++) {
@@ -97,6 +102,17 @@ async function resolveText(pubkey: string): Promise<Resolved> {
   const createdAt = oldest.blockTime ? new Date(oldest.blockTime * 1000).toISOString() : undefined;
   if (!tx?.transaction?.message) return { createdAt };
 
+  // reward token: the escrow's mint + decimals from the create tx's token balances. Pick the
+  // most-referenced mint (the reward token; e.g. wSOL for SOL bounties, else a memecoin).
+  let rewardMint: string | undefined, rewardDecimals: number | undefined;
+  const tbs = (tx.meta?.postTokenBalances ?? []) as { mint: string; uiTokenAmount?: { decimals?: number } }[];
+  if (tbs.length) {
+    const freq = new Map<string, number>();
+    for (const tb of tbs) freq.set(tb.mint, (freq.get(tb.mint) ?? 0) + 1);
+    rewardMint = [...freq.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    rewardDecimals = tbs.find((t) => t.mint === rewardMint)?.uiTokenAmount?.decimals;
+  }
+
   const msg = tx.transaction.message;
   const keys: string[] = msg.accountKeys ?? [];
   const progIdx = keys.indexOf(PROGRAM);
@@ -109,10 +125,12 @@ async function resolveText(pubkey: string): Promise<Resolved> {
   for (const d of datas) { try { strings.push(...extractStrings(base58.decode(d))); } catch { /* not b58 */ } }
   const metadataUrl = strings.map((s) => s.match(/https?:\/\/[^\s'"]+/)?.[0]).find(Boolean);
 
-  const r: Resolved = { createdAt, metadataUrl, uuid: metadataUrl?.match(/[0-9a-f-]{36}/i)?.[0] };
-  // best-effort: pull the off-chain title/description from the metadata page (Cloudflare-gated,
-  // so this often comes back empty — the on-chain spine still indexes the bounty regardless).
-  if (metadataUrl) Object.assign(r, await fetchContent(metadataUrl));
+  const r: Resolved = { createdAt, metadataUrl, uuid: metadataUrl?.match(/[0-9a-f-]{36}/i)?.[0], rewardMint, rewardDecimals };
+  // Title/description live off-chain behind Cloudflare, which blocks datacenter IPs — only
+  // worth attempting when a browser session cookie is supplied (BOUNTIES_COOKIE), otherwise
+  // it just burns time returning 503s. The on-chain spine (mint, reward, creator) is complete
+  // without it; egregiousness text backfills once a cookie is set.
+  if (metadataUrl && process.env.BOUNTIES_COOKIE) Object.assign(r, await fetchContent(metadataUrl));
   return r;
 }
 
@@ -120,7 +138,7 @@ async function resolveText(pubkey: string): Promise<Resolved> {
  *  Returns {} on any failure (Cloudflare 503, redirect, no data) — never throws. */
 async function fetchContent(url: string): Promise<Partial<Resolved>> {
   try {
-    const res = await fetch(url, { headers: {
+    const res = await fetch(url, { signal: AbortSignal.timeout(4000), headers: {
       'user-agent': process.env.BOUNTIES_UA ||
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36',
       accept: 'text/html,application/json', ...(process.env.BOUNTIES_COOKIE ? { cookie: process.env.BOUNTIES_COOKIE } : {}),
@@ -173,29 +191,39 @@ export class OnchainBountySource {
     const accounts = await rpc<{ pubkey: string; account: { data: [string, string]; lamports: number } }[]>(
       'getProgramAccounts', [PROGRAM, { encoding: 'base64', filters: [{ dataSize: ACCOUNT_SIZE }] }]);
 
+    // raw reward amount @105 is in the reward TOKEN's base units — decimals come from the
+    // mint, which varies per bounty (wSOL, or any memecoin). Price each mint in USD.
+    const mints = [...new Set(accounts.map((a) => this.cache.get(a.pubkey)?.rewardMint).filter(Boolean) as string[])];
+    const prices = await getTokenPrices(mints).catch(() => new Map());
+
     const out = accounts.map((a) => {
       const pubkey = a.pubkey;
       const raw = base58Bytes(a.account.data[0]);
       const creator = raw ? pk(raw, 8) : undefined;
-      // reward pool amount lives at offset 105 (u64 lamports) — validated against the live
-      // UI (e.g. 4,800,000,000 = 4.8 SOL). The account's own lamports are just rent.
-      const rewardSol = raw && raw.length >= 113
-        ? Number(new DataView(raw.buffer, raw.byteOffset, raw.byteLength).getBigUint64(105, true)) / LAMPORTS
-        : 0;
+      const rawReward = raw && raw.length >= 113
+        ? Number(new DataView(raw.buffer, raw.byteOffset, raw.byteLength).getBigUint64(105, true)) : 0;
       const r = this.cache.get(pubkey) ?? {};
+
+      const dec = r.rewardDecimals ?? 9;
+      const amount = rawReward / 10 ** dec;
+      const price = r.rewardMint ? prices.get(r.rewardMint) : undefined;
+      const rewardUsd = price ? amount * price.usdPrice : undefined;
+      const sym = r.rewardMint === WSOL ? 'SOL' : (r.rewardMint ? r.rewardMint.slice(0, 4) + '…' : '');
+
       return {
         id: pubkey,
         url: r.metadataUrl ?? `https://pump.fun/go/${pubkey}`,
         title: r.title,
         description: r.description,
         author: creator,
-        reward: rewardSol > 0 ? `${rewardSol} SOL` : (r.reward ?? '—'),
+        reward: r.rewardMint ? `${formatAmt(amount)} ${sym}` : '—',
         createdAt: r.createdAt,
-        raw: { lamports: a.account.lamports, program: PROGRAM, uuid: r.uuid, account: pubkey, rewardSol },
+        raw: { lamports: a.account.lamports, program: PROGRAM, uuid: r.uuid, account: pubkey,
+          rewardMint: r.rewardMint, rewardAmount: amount, rewardUsd },
       } satisfies Bounty;
     });
 
-    // backfill metadata/text for not-yet-resolved bounties, off the hot path
+    // backfill metadata/mint/text for not-yet-resolved bounties, off the hot path
     void this.resolveBacklog(accounts.map((a) => a.pubkey).filter((pk) => !this.cache.has(pk)));
     return out;
   }
@@ -205,13 +233,20 @@ export class OnchainBountySource {
   private async resolveBacklog(pending: string[]): Promise<void> {
     if (this.resolving || pending.length === 0) return;
     this.resolving = true;
+    const batch = pending.slice(0, RESOLVE_MAX);
+    const CONCURRENCY = Number(process.env.BOUNTIES_RESOLVE_CONCURRENCY || 8);
     try {
-      for (const pubkey of pending.slice(0, RESOLVE_MAX)) {
-        const r = await resolveText(pubkey).catch(() => ({} as Resolved));
-        this.cache.set(pubkey, r);
-      }
+      let i = 0;
+      const worker = async () => {
+        while (i < batch.length) {
+          const pubkey = batch[i++];
+          const r = await resolveText(pubkey).catch(() => ({} as Resolved));
+          this.cache.set(pubkey, r);
+        }
+      };
+      await Promise.all(Array.from({ length: CONCURRENCY }, worker));
       await this.saveCache().catch(() => {});
-      console.log(`[onchain] resolved ${Math.min(pending.length, RESOLVE_MAX)} bounty metadata (${pending.length} pending)`);
+      console.log(`[onchain] resolved ${batch.length} bounty metadata (${pending.length} were pending)`);
     } finally {
       this.resolving = false;
     }
