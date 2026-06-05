@@ -65,6 +65,10 @@ async function pass(store: BountyStore, source: Source): Promise<void> {
   const flagged = ranked.filter((r) => r.tier !== 'BENIGN');
   const worst = ranked[0];
 
+  // lightweight list for the browser scraper: which bounties still need off-chain text
+  bus.setAll(fresh.map((b) => ({ account: b.id, uuid: (b.raw as any)?.uuid,
+    url: b.url, hasText: Boolean(b.title || (b.raw as any)?.submissionCount) })));
+
   // Feed the live dashboard: snapshot for new clients + per-event stream.
   const solPriceUsd = await getSolPriceUsd();
   // each bounty rewards in its own token; raw.rewardUsd is already priced per-mint. Count
@@ -76,9 +80,11 @@ async function pass(store: BountyStore, source: Source): Promise<void> {
     for (const c of new Set(r.hits.map((h) => h.category))) a[c] = (a[c] ?? 0) + 1; return a;
   }, {});
   const newest = ranked.map((r) => r.bounty.createdAt).filter(Boolean).sort().at(-1);
+  const moderated = ranked.filter((r) => (r.bounty.raw as any)?.removed).length;
+  const condoned = flagged.filter((r) => !(r.bounty.raw as any)?.removed).length;
   const stats = { fetchedAt, total: ranked.length, flagged: flagged.length,
     rewardSol: Number(rewardSol.toFixed(3)), rewardUsd: Number(rewardUsd.toFixed(2)), solPriceUsd, newest,
-    pricedCount,
+    pricedCount, moderated, condoned,
     counts: flagged.reduce<Record<string, number>>((a, r) => ((a[r.tier] = (a[r.tier] ?? 0) + 1), a), {}),
     categories };
   bus.setSnapshot(flagged, stats);
@@ -87,7 +93,7 @@ async function pass(store: BountyStore, source: Source): Promise<void> {
   }
   bus.emit({ type: 'pass', ts: fetchedAt, fetched: fresh.length, added: delta.added,
     updated: delta.updated, gone: delta.gone, flagged: flagged.length, total: ranked.length,
-    rewardSol: stats.rewardSol, rewardUsd: stats.rewardUsd, solPriceUsd, pricedCount, counts: stats.counts, categories, newest,
+    rewardSol: stats.rewardSol, rewardUsd: stats.rewardUsd, solPriceUsd, pricedCount, moderated, condoned, counts: stats.counts, categories, newest,
     top: worst ? { score: worst.score, tier: worst.tier, rationale: worst.rationale } : null });
 
   console.log(

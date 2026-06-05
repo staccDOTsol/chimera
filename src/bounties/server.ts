@@ -10,12 +10,52 @@
 
 import { createServer } from 'node:http';
 import { bus } from './events.ts';
+import { observeScrape, removedEvidence } from './enrich-store.ts';
 
 const PORT = Number(process.env.BOUNTIES_PORT || process.env.PORT || 8080);
+const ENRICH_TOKEN = process.env.BOUNTIES_ENRICH_TOKEN || '';
 
 export function startServer(): void {
   const server = createServer((req, res) => {
     const url = (req.url || '/').split('?')[0];
+
+    // CORS so a browser scraper / bookmarklet on pump.fun's origin can push enrichment.
+    res.setHeader('access-control-allow-origin', '*');
+    res.setHeader('access-control-allow-headers', 'content-type, authorization');
+    res.setHeader('access-control-allow-methods', 'GET, POST, OPTIONS');
+    if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
+
+    // list of all bounties (id/uuid/url/hasText) — the scraper uses this to know what to fetch.
+    if (url === '/api/bounties') return json(res, bus.getAll());
+
+    // bounties/submissions whose content was captured then later removed by moderators.
+    if (url === '/api/removed') return json(res, removedEvidence());
+
+    // ingest scraped observations. Each item: {uuid, present, title?, description?, submissions?}.
+    // present:false means "page reachable but content gone" → preserved as removal evidence.
+    if (url === '/api/enrich' && req.method === 'POST') {
+      const auth = (req.headers.authorization || '').replace(/^Bearer /, '') || new URL(req.url!, 'http://x').searchParams.get('token') || '';
+      if (ENRICH_TOKEN && auth !== ENRICH_TOKEN) { res.writeHead(401); return res.end('bad token'); }
+      let body = '';
+      req.on('data', (c) => { body += c; if (body.length > 8_000_000) req.destroy(); });
+      req.on('end', async () => {
+        try {
+          const payload = JSON.parse(body);
+          const items: any[] = Array.isArray(payload) ? payload : (payload.items ?? [payload]);
+          let n = 0, removed = 0;
+          for (const it of items) {
+            if (!it?.uuid) continue;
+            const { newlyRemoved } = await observeScrape(it.uuid, {
+              present: it.present !== false, title: it.title, description: it.description, submissions: it.submissions });
+            n++;
+            if (newlyRemoved) { removed++; bus.emit({ type: 'gone', uuid: it.uuid, title: it.title }); }
+          }
+          if (removed) bus.emit({ type: 'log', msg: `⚠ ${removed} bounties/submissions newly detected as MODERATED-REMOVED` });
+          json(res, { ok: true, observed: n, newlyRemoved: removed });
+        } catch (e) { res.writeHead(400); res.end('bad json: ' + (e as Error).message); }
+      });
+      return;
+    }
 
     if (url === '/api/stats') {
       const { stats } = bus.getSnapshot();
@@ -105,6 +145,10 @@ const PAGE = /* html */ `<!doctype html>
   .meta{color:var(--mut);font-size:11.5px;margin-top:5px;display:flex;gap:12px;flex-wrap:wrap}
   .meta a{color:#7ab6ff;text-decoration:none}
   .rat{margin-top:6px;font-size:12.5px;color:#cdd5e3}
+  .subs{margin-top:6px;font-size:12px;color:#9fb0c9;border-top:1px dashed var(--line);padding-top:6px}
+  .rm{font-size:10.5px;font-weight:800;letter-spacing:.05em;color:#fff;background:#7a1f24;border:1px solid #b03640;border-radius:6px;padding:2px 7px}
+  .b.removed{opacity:.92;border-left-color:#b03640!important;background:#1a1113}
+  .b.removed .title{text-decoration:line-through;text-decoration-color:#b03640}
   .empty{color:var(--mut);text-align:center;padding:40px 0}
   .new{animation:flash 1.2s ease-out}
   @keyframes flash{from{background:#1f2a1f}to{background:var(--card)}}
@@ -124,10 +168,10 @@ const PAGE = /* html */ `<!doctype html>
 <main>
   <p class="note">Live abuse index of pump.fun bounties — enumerated on-chain (program <code>goGz…KiV</code>, un-deletable) and ranked by harm severity. Captured for reporting (platform T&S / NCMEC / IC3 / Action Fraud). Named targets are victims — do not contact or expose them.</p>
   <section id="summary" class="summary">
-    <div class="stat"><div class="k">bounties indexed</div><div class="v" id="sTotal">—</div></div>
+    <div class="stat"><div class="k">bounties indexed</div><div class="v" id="sTotal">—</div><div class="ksub" id="sPrice">—</div></div>
     <div class="stat"><div class="k">total reward pool</div><div class="v" id="sUsd">—</div><div class="ksub" id="sSol">—</div></div>
-    <div class="stat"><div class="k">flagged</div><div class="v" id="sFlagged">—</div></div>
-    <div class="stat"><div class="k">newest bounty</div><div class="v" id="sNewest">—</div><div class="ksub" id="sPrice">—</div></div>
+    <div class="stat" title="egregious bounties still live — what pump.fun condones"><div class="k">⚠ condoned (live)</div><div class="v" id="sCondoned">—</div></div>
+    <div class="stat" title="content captured, then removed by moderators — evidence preserved"><div class="k">🗑 moderated (removed)</div><div class="v" id="sModerated">—</div></div>
     <div class="stat wide"><div class="k">harm breakdown</div><div class="v cats" id="sCats">—</div></div>
   </section>
   <div id="feed" class="feed"><div class="empty" id="empty">waiting for the first index pass…</div></div>
@@ -143,14 +187,18 @@ function card(r){
   const cats=[...new Set((r.hits||[]).map(h=>h.category.replace(/_/g,' ')))].join(', ')||'—';
   const t=(r.bounty.title||r.bounty.description||'(untitled)');
   const link=r.bounty.url?'<a href="'+r.bounty.url+'" target="_blank" rel="noopener">open ↗</a>':'';
+  const rm=r.bounty.raw&&r.bounty.raw.removed;
   const html='<div class="top"><span class="score">'+r.score+'</span><span class="tier">'+r.tier+'</span>'
+    +(rm?'<span class="rm">🗑 MODERATED-REMOVED'+(r.bounty.raw.removedAt?' '+new Date(r.bounty.raw.removedAt).toLocaleDateString():'')+'</span>':'')
     +'<span class="title">'+esc(t).slice(0,140)+'</span></div>'
     +'<div class="cats">'+esc(cats)+(r.targetsNamedPerson?' · <b style="color:#ff9a9a">named target</b>':'')+'</div>'
     +'<div class="rat">'+esc(r.rationale||'')+'</div>'
+    +((r.bounty.raw&&r.bounty.raw.submissions&&r.bounty.raw.submissions.length)?'<div class="subs">📝 '+r.bounty.raw.submissions.length+' submission'+(r.bounty.raw.submissions.length>1?'s':'')+': '+r.bounty.raw.submissions.slice(0,3).map(s=>esc((s.author?s.author+': ':'')+(s.text||'')).slice(0,80)).join(' · ')+'</div>':'')
     +'<div class="meta">'+(r.bounty.author?'<span>by '+esc(r.bounty.author)+'</span>':'')
     +(r.bounty.reward?'<span>💰 '+esc(r.bounty.reward)+(r.bounty.raw&&r.bounty.raw.rewardSol&&SOLP?' (~'+usd(r.bounty.raw.rewardSol*SOLP)+')':'')+'</span>':'')+'<span>report: '+esc((r.reportTo||[]).join('; '))+'</span>'+link+'</div>';
-  if(!el){el=document.createElement('div');el.id=id;el.className='b '+r.tier+' new';el.innerHTML=html;}
-  else{el.className='b '+r.tier;el.innerHTML=html;}
+  const cls='b '+r.tier+(rm?' removed':'');
+  if(!el){el=document.createElement('div');el.id=id;el.className=cls+' new';el.innerHTML=html;}
+  else{el.className=cls;el.innerHTML=html;}
   return el;
 }
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
@@ -169,8 +217,8 @@ function summarize(s){if(!s)return;
   if(s.rewardUsd!=null)sUsd.textContent=usd(s.rewardUsd);
   if(s.rewardSol!=null)sSol.textContent='≈ '+Number(s.rewardSol).toLocaleString(undefined,{maximumFractionDigits:0})+' SOL'+(s.pricedCount!=null?' · '+s.pricedCount+' priced':'');
   if(SOLP)sPrice.textContent='SOL ≈ $'+SOLP.toLocaleString(undefined,{maximumFractionDigits:2});
-  if(s.flagged!=null)sFlagged.textContent=s.flagged;
-  if(s.newest)sNewest.textContent=new Date(s.newest).toLocaleDateString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+  if(s.condoned!=null)sCondoned.textContent=s.condoned;
+  if(s.moderated!=null)sModerated.textContent=s.moderated;
   if(s.categories){const ent=Object.entries(s.categories).sort((a,b)=>b[1]-a[1]);
     sCats.innerHTML=ent.length?ent.map(([k,v])=>'<span>'+esc(CATLABEL[k]||k)+' '+v+'</span>').join(''):'—';}
 }

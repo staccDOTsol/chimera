@@ -18,6 +18,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { base58 } from '@scure/base';
 import { getTokenPrices } from './price.ts';
+import { getEnrichment, loadEnrichment } from './enrich-store.ts';
 import type { Bounty } from './types.ts';
 
 const WSOL = 'So11111111111111111111111111111111111111112';
@@ -188,6 +189,7 @@ export class OnchainBountySource {
    *  limited, Cloudflare-gated) runs in the BACKGROUND so it never blocks the index/site. */
   async fetch(): Promise<Bounty[]> {
     await this.loadCache();
+    await loadEnrichment();
     const accounts = await rpc<{ pubkey: string; account: { data: [string, string]; lamports: number } }[]>(
       'getProgramAccounts', [PROGRAM, { encoding: 'base64', filters: [{ dataSize: ACCOUNT_SIZE }] }]);
 
@@ -210,16 +212,22 @@ export class OnchainBountySource {
       const rewardUsd = price ? amount * price.usdPrice : undefined;
       const sym = r.rewardMint === WSOL ? 'SOL' : (r.rewardMint ? r.rewardMint.slice(0, 4) + '…' : '');
 
+      // off-chain text pushed in by the browser scraper (title/description/submissions)
+      const enr = getEnrichment(r.uuid);
+      const subText = enr?.submissions?.map((s) => `${s.author ?? ''}: ${s.text ?? ''}`).join('  ·  ') ?? '';
+
       return {
         id: pubkey,
         url: r.metadataUrl ?? `https://pump.fun/go/${pubkey}`,
-        title: r.title,
-        description: r.description,
+        title: enr?.title ?? r.title,
+        description: [enr?.description ?? r.description, subText].filter(Boolean).join('  —  ') || undefined,
         author: creator,
         reward: r.rewardMint ? `${formatAmt(amount)} ${sym}` : '—',
         createdAt: r.createdAt,
         raw: { lamports: a.account.lamports, program: PROGRAM, uuid: r.uuid, account: pubkey,
-          rewardMint: r.rewardMint, rewardAmount: amount, rewardUsd },
+          rewardMint: r.rewardMint, rewardAmount: amount, rewardUsd,
+          submissions: enr?.submissions, submissionCount: enr?.submissions?.length,
+          removed: enr?.removed, removedAt: enr?.removedAt },
       } satisfies Bounty;
     });
 

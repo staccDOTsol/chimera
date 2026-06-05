@@ -19,6 +19,8 @@ class Bus {
   /** Latest ranked flagged bounties — sent to new subscribers for instant paint. */
   private snapshot: ScoredBounty[] = [];
   private stats: Record<string, unknown> = {};
+  /** Lightweight list of ALL bounties (id/uuid/url/hasText) for the scraper. */
+  private all: { account: string; uuid?: string; url?: string; hasText: boolean }[] = [];
 
   emit(ev: Omit<IndexerEvent, 'ts'> & { ts?: string }): void {
     const full: IndexerEvent = { ...ev, ts: ev.ts ?? new Date().toISOString() } as IndexerEvent;
@@ -41,6 +43,9 @@ class Bus {
   getSnapshot(): { ranked: ScoredBounty[]; stats: Record<string, unknown> } {
     return { ranked: this.snapshot, stats: this.stats };
   }
+
+  setAll(list: { account: string; uuid?: string; url?: string; hasText: boolean }[]): void { this.all = list; }
+  getAll(): { account: string; uuid?: string; url?: string; hasText: boolean }[] { return this.all; }
 }
 
 export const bus = new Bus();
