@@ -1,13 +1,20 @@
-# Dockerfile.bounties — 24/7 worker: indexes go.pump.fun bounties straight off Solana
-# (src/bounties, BOUNTIES_SOURCE=onchain) and serves the live SSE dashboard. No browser /
-# Chromium needed — on-chain enumeration is permissionless and un-deletable, and off-chain
-# title/description is best-effort HTTP enrichment. Light image → fast, reliable builds.
+# Dockerfile.bounties — 24/7 worker: indexes pump.fun bounties off Solana (BOUNTIES_SOURCE=
+# onchain), serves the live SSE dashboard, AND self-scrapes with headless Chrome to capture
+# off-chain content (title/description/submissions) and detect moderator removals over time.
 FROM node:24-bookworm-slim
 WORKDIR /app
 RUN corepack enable
 
+# Google Chrome for the self-scraper (pump.fun bounty pages are client-rendered SPAs, so a
+# real browser is required to read them). apt over HTTP works in the build.
+RUN apt-get update && apt-get install -y --no-install-recommends wget gnupg ca-certificates \
+ && wget -qO- https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google.gpg \
+ && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
+ && apt-get update && apt-get install -y --no-install-recommends google-chrome-stable fonts-liberation \
+ && rm -rf /var/lib/apt/lists/*
+
 COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --prod --frozen-lockfile
+RUN pnpm install --prod --frozen-lockfile && pnpm add playwright-core
 
 COPY src ./src
 
@@ -15,9 +22,14 @@ ENV BOUNTIES_SOURCE=onchain
 ENV BOUNTIES_OUT_DIR=/data/bounties
 ENV BOUNTIES_INTERVAL_SEC=120
 ENV BOUNTIES_PORT=8080
-# Evidence store + onchain cache persist on the mounted volume at /data.
+# self-scrape: render bounty pages every SCRAPE_INTERVAL_SEC to enrich + catch removals
+ENV BOUNTIES_SELF_SCRAPE=1
+ENV CHROME_PATH=/usr/bin/google-chrome-stable
+ENV SCRAPE_INTERVAL_SEC=1800
+ENV SCRAPE_CONCURRENCY=3
+ENV BOUNTIES_REMOVAL_CONFIRM=2
+# Evidence store + caches persist on the mounted volume at /data.
 VOLUME ["/data"]
 EXPOSE 8080
 
-# loop + live SSE dashboard in one process (one machine).
 CMD ["node", "src/bounties/reindex.ts", "--loop", "--serve"]

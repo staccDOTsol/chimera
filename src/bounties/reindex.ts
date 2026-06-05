@@ -10,6 +10,7 @@
 //      BOUNTIES_OUT_DIR (default ./data/bounties).
 
 import { mkdir, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { fetchAllBounties } from './source.ts';
 import { rankBounties } from './score.ts';
@@ -105,6 +106,22 @@ async function pass(store: BountyStore, source: Source): Promise<void> {
   }
 }
 
+/** Periodically spawn the headless-Chrome scraper against ourselves (localhost) so the
+ *  worker self-enriches and re-checks content over time — that's what detects moderator
+ *  removals. Spawned as a child so a Chrome crash can't take down the indexer/server. */
+function startSelfScrape(): void {
+  const intervalMs = Number(process.env.SCRAPE_INTERVAL_SEC || 1800) * 1000;
+  const run = () => {
+    const env = { ...process.env, WORKER: `http://127.0.0.1:${process.env.BOUNTIES_PORT || 8080}` };
+    const child = spawn(process.execPath, ['src/bounties/scrape.ts', '--all'], { env, stdio: 'inherit' });
+    child.on('exit', (code) => console.log(`[self-scrape] pass done (code ${code}); next in ${intervalMs / 1000}s`));
+    child.on('error', (e) => console.error('[self-scrape] spawn failed:', e.message));
+  };
+  setTimeout(run, 30_000);        // first pass after the index warms up
+  setInterval(run, intervalMs);
+  console.log(`[self-scrape] enabled — Chrome scrape every ${intervalMs / 1000}s`);
+}
+
 async function main(): Promise<void> {
   const store = new BountyStore(join(OUT_DIR, 'index.json'));
   await store.load();
@@ -113,6 +130,7 @@ async function main(): Promise<void> {
   if (process.argv.includes('--serve')) {
     const { startServer } = await import('./server.ts');
     startServer();
+    if (process.env.BOUNTIES_SELF_SCRAPE === '1') startSelfScrape();
   }
 
   const source = await makeSource();

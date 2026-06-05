@@ -8,3 +8,4 @@ dist/
 
 # scraped bounty evidence / generated reports — keep out of git by default
 data/bounties/
+chrome.deb

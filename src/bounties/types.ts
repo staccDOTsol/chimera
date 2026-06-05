@@ -42,6 +42,7 @@ export type HarmCategory =
   | 'targeted_threat'           // threat/retaliation aimed at a named individual
   | 'doxxing_pii'               // home address, phone, family, "find where X lives"
   | 'sexual_exploitation'       // non-minor sexual coercion / NCII ("revenge porn")
+  | 'sexual_explicit'           // crude/lewd: public nudity, sexual acts, "tits out", strip
   | 'harassment_named'          // sustained harassment of a named person
   | 'hate_protected'            // targets a protected class
   | 'property_or_fraud_crime'   // pay-to-steal / swat / hack / financial crime

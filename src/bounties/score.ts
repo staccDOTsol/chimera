@@ -18,6 +18,7 @@ const SEVERITY: Record<HarmCategory, number> = {
   targeted_threat: 88,
   doxxing_pii: 80,
   sexual_exploitation: 78,
+  sexual_explicit: 58,
   harassment_named: 62,
   hate_protected: 60,
   property_or_fraud_crime: 55,
@@ -32,6 +33,7 @@ const REPORT_ROUTES: Record<HarmCategory, string[]> = {
   targeted_threat: ['law enforcement', 'platform T&S', 'warn the named target via a trusted channel'],
   doxxing_pii: ['platform T&S', 'the affected person', 'UK ICO / data-protection regulator'],
   sexual_exploitation: ['platform T&S', 'StopNCII.org', 'law enforcement'],
+  sexual_explicit: ['platform T&S (adult-content / public-indecency policy)'],
   harassment_named: ['platform T&S', 'the affected person'],
   hate_protected: ['platform T&S', 'relevant hate-crime reporting line'],
   property_or_fraud_crime: ['UK Action Fraud / FBI IC3', 'platform T&S'],
@@ -75,6 +77,13 @@ const SIGNALS: { category: HarmCategory; patterns: RegExp[] }[] = [
     patterns: [
       /\b(revenge\s+porn|leak(ed)?\s+nudes?|ncii|non[-\s]?consensual|deepfake\s+(porn|nudes?))\b/,
       /\b(blackmail|sextortion)\b/,
+    ],
+  },
+  {
+    category: 'sexual_explicit',
+    patterns: [
+      /\b(tits?\s+out|get\s+naked|nudes?|topless|flash(ing)?\s+(in\s+public|your)|strip(per|ping)?|show\s+(your|us)\s+(tits|ass|boobs|cock|pussy)|jerk\s+off|onlyfans|porn(hub)?|nsfw|sex\s+tape|cum|blowjob|nude\s+in\s+public)\b/,
+      /\b(get\s+your\s+(tits|ass|boobs)\s+out|public\s+(nudity|indecency)|expose\s+(yourself|your\s+body))\b/,
     ],
   },
   {
